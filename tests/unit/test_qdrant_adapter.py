@@ -205,6 +205,9 @@ class TestQdrantQuery:
         # Save multiple entries
         await qdrant_adapter.bulk_save(sample_entries)
         
+        # Give Qdrant time to index the vectors
+        await asyncio.sleep(0.5)
+        
         # Query with last entry's embedding (most distinct: [0.4, 0.4, ...])
         query_embedding = sample_entries[4].embedding
         results = await qdrant_adapter.query(query_embedding, limit=3)

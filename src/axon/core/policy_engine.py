@@ -551,3 +551,99 @@ class PolicyEngine:
             return to_index < from_index  # Must move down
         except ValueError:
             return False
+    
+    def should_compact(
+        self,
+        tier_name: str,
+        current_count: Optional[int] = None
+    ) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Check if a tier should be compacted based on policy.
+        
+        Compaction is triggered when a tier exceeds its compaction_threshold
+        as defined in the tier's policy. This helps manage storage costs
+        and query performance by summarizing old/less important entries.
+        
+        Args:
+            tier_name: Name of tier to check for compaction
+            current_count: Current entry count (None = query from adapter)
+            
+        Returns:
+            Tuple of (should_compact: bool, details: dict)
+            
+            details contains:
+                - tier: str - Tier name
+                - current_count: int - Current entry count
+                - threshold: int|None - Compaction threshold from policy
+                - over_threshold: int - How many entries over threshold
+                - reason: str - Human-readable explanation
+                
+        Example:
+            >>> should, details = engine.should_compact("persistent")
+            >>> if should:
+            ...     print(f"Compact {details['tier']}: {details['reason']}")
+            ...     # Compact persistent: 15,000 entries exceeds threshold of 10,000
+            
+            >>> should, details = engine.should_compact("session", current_count=5000)
+            >>> if not should:
+            ...     print(f"No compaction needed: {details['reason']}")
+        """
+        # Get policy for tier
+        policy = self.tier_policies.get(tier_name)
+        if not policy:
+            return False, {
+                "tier": tier_name,
+                "current_count": 0,
+                "threshold": None,
+                "over_threshold": 0,
+                "reason": f"Tier '{tier_name}' not found in policies"
+            }
+        
+        # Check if compaction is enabled for this tier
+        if policy.compaction_threshold is None:
+            return False, {
+                "tier": tier_name,
+                "current_count": current_count or 0,
+                "threshold": None,
+                "over_threshold": 0,
+                "reason": f"Compaction disabled for tier '{tier_name}' (threshold = None)"
+            }
+        
+        # Get current entry count
+        if current_count is None:
+            try:
+                adapter = self.adapter_registry.get_adapter(tier_name)
+                current_count = adapter.count()
+            except Exception as e:
+                logger.warning(
+                    f"Failed to get count for tier '{tier_name}': {e}. "
+                    "Assuming count = 0"
+                )
+                current_count = 0
+        
+        # Check if threshold is exceeded
+        threshold = policy.compaction_threshold
+        if current_count >= threshold:
+            over_threshold = current_count - threshold
+            return True, {
+                "tier": tier_name,
+                "current_count": current_count,
+                "threshold": threshold,
+                "over_threshold": over_threshold,
+                "reason": (
+                    f"{current_count:,} entries exceeds threshold of {threshold:,} "
+                    f"(over by {over_threshold:,})"
+                )
+            }
+        else:
+            under_threshold = threshold - current_count
+            return False, {
+                "tier": tier_name,
+                "current_count": current_count,
+                "threshold": threshold,
+                "over_threshold": 0,
+                "reason": (
+                    f"{current_count:,} entries is below threshold of {threshold:,} "
+                    f"(under by {under_threshold:,})"
+                )
+            }

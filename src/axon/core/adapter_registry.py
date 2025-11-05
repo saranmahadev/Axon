@@ -178,7 +178,7 @@ class AdapterRegistry:
         
         Args:
             adapter_type: Adapter type
-            config: Configuration dict
+            config: Configuration dict or Policy object
         
         Returns:
             StorageAdapter instance
@@ -186,9 +186,20 @@ class AdapterRegistry:
         Raises:
             ValueError: If adapter_type not supported
         """
+        # Convert Policy object to dict if needed
+        if hasattr(config, 'model_dump'):
+            config = config.model_dump()
+        
+        # Filter out policy-specific fields that adapters don't need
+        policy_fields = {'tier_name', 'adapter_type', 'ttl_seconds', 'max_entries',
+                        'compaction_threshold', 'eviction_strategy', 'enable_vector_search',
+                        'compaction_strategy', 'archive_adapter'}
+        adapter_config = {k: v for k, v in config.items() if k not in policy_fields}
+        
         if adapter_type == "memory":
             from axon.adapters.memory import InMemoryAdapter
-            return InMemoryAdapter(**config)
+            # InMemoryAdapter doesn't take any constructor params
+            return InMemoryAdapter()
         elif adapter_type == "redis":
             from axon.adapters.redis import RedisAdapter
             return RedisAdapter(**config)

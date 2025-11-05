@@ -59,31 +59,36 @@ class InMemoryAdapter(StorageAdapter):
 
     async def query(
         self,
-        vector: list[float],
+        vector: list[float] | str,
         k: int = 5,
         filter: Filter | None = None,
     ) -> list[MemoryEntry]:
-        """Query by vector similarity with optional filtering.
+        """Query by vector similarity or text search with optional filtering.
 
-        Uses cosine similarity to find the k most similar entries.
-        Only considers entries that have embeddings.
+        If vector is a string, performs simple text matching (case-insensitive substring search).
+        If vector is a list of floats, performs semantic similarity search using cosine similarity.
 
         Args:
-            vector: Query embedding vector
+            vector: Query embedding vector (list of floats) or query text (string)
             k: Number of results to return
             filter: Optional metadata filter
 
         Returns:
-            List of up to k matching entries, ordered by similarity
+            List of up to k matching entries, ordered by similarity or relevance
 
         Raises:
             ValueError: If vector is empty or k <= 0
         """
         if not vector:
-            raise ValueError("Query vector cannot be empty")
+            raise ValueError("Query vector/text cannot be empty")
         if k <= 0:
             raise ValueError("k must be positive")
 
+        # Handle string query (text search fallback)
+        if isinstance(vector, str):
+            return await self._text_search(vector, k, filter)
+
+        # Handle vector query (semantic search)
         # Get all entries with embeddings
         entries_with_embeddings = [
             entry for entry in self._storage.values() if entry.has_embedding
@@ -123,6 +128,67 @@ class InMemoryAdapter(StorageAdapter):
         # Sort by similarity (highest first) and return top k
         similarities.sort(key=lambda x: x[0], reverse=True)
         return [entry for _, entry in similarities[:k]]
+
+    async def _text_search(
+        self,
+        query_text: str,
+        k: int,
+        filter: Filter | None = None
+    ) -> list[MemoryEntry]:
+        """Perform simple text-based search when no embeddings are available.
+
+        Args:
+            query_text: Search query string
+            k: Number of results to return
+            filter: Optional metadata filter
+
+        Returns:
+            List of matching entries ordered by relevance
+        """
+        query_lower = query_text.lower()
+        query_words = set(query_lower.split())
+
+        # Get all entries
+        entries = list(self._storage.values())
+
+        # Apply metadata filter if provided
+        if filter is not None:
+            entries = [entry for entry in entries if filter.matches(entry)]
+
+        if not entries:
+            return []
+
+        # Score each entry by text relevance
+        scored_entries: list[tuple[float, MemoryEntry]] = []
+
+        for entry in entries:
+            text_lower = entry.text.lower()
+            
+            # Calculate simple relevance score
+            score = 0.0
+            
+            # Exact phrase match (highest score)
+            if query_lower in text_lower:
+                score += 10.0
+            
+            # Word matches
+            text_words = set(text_lower.split())
+            matching_words = query_words & text_words
+            score += len(matching_words) * 2.0
+            
+            # Tag matches
+            if entry.metadata.tags:
+                tag_words = set(word.lower() for tag in entry.metadata.tags for word in tag.split())
+                matching_tag_words = query_words & tag_words
+                score += len(matching_tag_words) * 1.5
+            
+            # Only include entries with some relevance
+            if score > 0:
+                scored_entries.append((score, entry))
+
+        # Sort by score (highest first) and return top k
+        scored_entries.sort(key=lambda x: x[0], reverse=True)
+        return [entry for _, entry in scored_entries[:k]]
 
     async def get(self, id: str) -> MemoryEntry:
         """Retrieve a memory entry by ID.

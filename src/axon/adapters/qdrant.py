@@ -69,10 +69,15 @@ class QdrantAdapter(StorageAdapter):
         self._embedding_dim: Optional[int] = None
         
         # Initialize async client
-        self.client = AsyncQdrantClient(
-            url=url,
-            api_key=api_key,
-            timeout=timeout,
+        import warnings
+        with warnings.catch_warnings():
+            # Suppress the warning about using API key with insecure connection
+            # This is expected in local testing scenarios
+            warnings.filterwarnings("ignore", message="Api key is used with an insecure connection")
+            self.client = AsyncQdrantClient(
+                url=url,
+                api_key=api_key,
+                timeout=timeout,
             **kwargs
         )
     

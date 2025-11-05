@@ -67,6 +67,22 @@ class MemoryConfig(BaseModel):
         description="Auto-demote old/unimportant memories to lower tiers"
     )
     
+    @property
+    def tiers(self) -> dict:
+        """
+        Get configured tiers as a dictionary.
+        
+        Returns:
+            Dictionary mapping tier names to their policy configurations
+        """
+        result = {}
+        if self.ephemeral:
+            result["ephemeral"] = self.ephemeral
+        if self.session:
+            result["session"] = self.session
+        result["persistent"] = self.persistent
+        return result
+    
     @model_validator(mode='after')
     def validate_default_tier_exists(self):
         """
