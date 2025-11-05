@@ -4,8 +4,8 @@ This module contains adapter implementations for:
 - InMemoryAdapter (Sprint 1.2) ✅
 - ChromaAdapter (Sprint 2.1a) ✅
 - QdrantAdapter (Sprint 2.1b) ✅
-- PineconeAdapter (Sprint 2.1c) 🚧
-- RedisAdapter (Sprint 2.2)
+- PineconeAdapter (Sprint 2.1c) ✅
+- RedisAdapter (Sprint 2.2) 🚧
 - SQLAdapter, S3Adapter (Sprint 5.x)
 """
 
@@ -14,6 +14,7 @@ from .chroma import ChromaAdapter
 from .memory import InMemoryAdapter
 from .pinecone import PineconeAdapter
 from .qdrant import QdrantAdapter
+from .redis import RedisAdapter
 
 __all__ = [
     "StorageAdapter",
@@ -21,5 +22,6 @@ __all__ = [
     "ChromaAdapter",
     "QdrantAdapter",
     "PineconeAdapter",
+    "RedisAdapter",
 ]
 
