@@ -10,6 +10,10 @@ This module will contain:
 from .policy import Policy
 from .config import MemoryConfig
 from .policies import EphemeralPolicy, SessionPolicy, PersistentPolicy
+from .adapter_registry import AdapterRegistry
+from .router import Router
+from .scoring import ScoringEngine, ScoringConfig
+from .policy_engine import PolicyEngine
 from . import templates
 
 __all__ = [
@@ -18,6 +22,11 @@ __all__ = [
     "EphemeralPolicy",
     "SessionPolicy",
     "PersistentPolicy",
+    "AdapterRegistry",
+    "Router",
+    "ScoringEngine",
+    "ScoringConfig",
+    "PolicyEngine",
     "templates",
 ]
 
