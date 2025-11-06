@@ -1047,7 +1047,8 @@ class MemorySystem:
         strategy: str = "count",
         threshold: Optional[int] = None,
         dry_run: bool = False,
-        summarizer: Optional[Any] = None
+        summarizer: Optional[Any] = None,
+        embedder: Optional[Any] = None
     ) -> Dict[str, Any]:
         """
         Compact memories in a tier by summarizing groups of entries.
@@ -1074,6 +1075,7 @@ class MemorySystem:
             threshold: Entry count threshold override (None = use policy default)
             dry_run: If True, return what would be compacted without doing it
             summarizer: Summarizer instance to use (None = create default LLMSummarizer)
+            embedder: Embedder instance for generating summary embeddings (optional)
             
         Returns:
             Dictionary with compaction results:
@@ -1146,8 +1148,8 @@ class MemorySystem:
         else:
             # Check all tiers
             for tier_name in self.config.tiers.keys():
-                adapter = self.registry.get_adapter(tier_name)
-                current_count = adapter.count()
+                adapter = await self.registry.get_adapter(tier_name)
+                current_count = await adapter.count()
                 should_compact, details = self.policy_engine.should_compact(
                     tier_name, current_count
                 )
@@ -1174,16 +1176,17 @@ class MemorySystem:
                 self._trace_events.append(
                     TraceEvent(
                         timestamp=datetime.now(),
-                        action="compact",
+                        operation="compact",
+                        duration_ms=0.0,
+                        tier=tier or "all",
+                        result_count=0,
+                        success=True,
                         metadata={
-                            "tier": tier or "all",
                             "strategy": strategy,
                             "tiers_checked": list(self.config.tiers.keys()),
                             "tiers_compacted": 0,
                             "dry_run": dry_run
-                        },
-                        result_count=0,
-                        duration=(datetime.now() - start_time).total_seconds()
+                        }
                     )
                 )
             
@@ -1201,7 +1204,7 @@ class MemorySystem:
         
         for tier_name in tiers_to_compact:
             # Get adapter and current entries
-            adapter = self.registry.get_adapter(tier_name)
+            adapter = await self.registry.get_adapter(tier_name)
             
             # Get compaction threshold
             tier_threshold = threshold
@@ -1213,7 +1216,7 @@ class MemorySystem:
                     continue  # Skip if no threshold
             
             # Get current count
-            current_count = adapter.count()
+            current_count = await adapter.count()
             total_before += current_count
             
             # Check if compaction is needed
@@ -1230,7 +1233,7 @@ class MemorySystem:
                 continue
             
             # Query all entries
-            all_entries = adapter.query(
+            all_entries = await adapter.query(
                 query_vector=[0.0] * 1536,  # Dummy vector
                 k=current_count,
                 filter=None
@@ -1280,24 +1283,25 @@ class MemorySystem:
                     provenance = ProvenanceEvent(
                         timestamp=datetime.now(),
                         action="compact",
-                        details={
+                        by="memory_system",
+                        metadata={
                             "strategy": strategy,
                             "tier": tier_name,
-                            "summarized_count": len(group),
-                            "summarized_ids": [e.id for e in group],
-                            "original_importance_avg": avg_importance
+                            "summarized_count": str(len(group)),
+                            "summarized_ids": ",".join([e.id for e in group]),
+                            "original_importance_avg": str(avg_importance)
                         }
                     )
                     
                     # Create summary entry
                     summary_entry = MemoryEntry(
-                        id=self._generate_id(),
+                        id=str(uuid.uuid4()),
                         text=summary_text,
                         embedding=None,  # No embedding yet (will be generated on save)
                         metadata=MemoryMetadata(
                             user_id=group[0].metadata.user_id,
                             session_id=group[0].metadata.session_id,
-                            source="compaction",
+                            source="system",  # Compaction is a system operation
                             privacy_level=group[0].metadata.privacy_level,
                             created_at=group[0].metadata.created_at,  # Use oldest date
                             last_accessed_at=datetime.now(),
@@ -1306,12 +1310,12 @@ class MemorySystem:
                             version="1.0",
                             provenance=[provenance]
                         ),
-                        entry_type=MemoryEntryType.SUMMARY
+                        entry_type=MemoryEntryType.EMBEDDING_SUMMARY  # Correct enum value
                     )
                     
-                    # Generate embedding for summary
-                    if self.embedder:
-                        summary_embedding = await self.embedder.embed(summary_text)
+                    # Generate embedding for summary (if embedder provided)
+                    if embedder:
+                        summary_embedding = await embedder.embed(summary_text)
                         summary_entry.embedding = summary_embedding
                     
                     summary_entries.append(summary_entry)
@@ -1328,7 +1332,7 @@ class MemorySystem:
                 # Delete entries that were summarized
                 for entry in entries_to_compact:
                     try:
-                        adapter.delete(entry.id)
+                        await adapter.delete(entry.id)
                     except Exception as e:
                         logger.warning(f"Failed to delete entry {entry.id}: {e}")
                 
@@ -1340,7 +1344,7 @@ class MemorySystem:
                         logger.error(f"Failed to save summary entry: {e}")
             
             # Update count
-            new_count = adapter.count()
+            new_count = await adapter.count()
             total_after += new_count
         
         # Calculate statistics
@@ -1367,18 +1371,19 @@ class MemorySystem:
             self._trace_events.append(
                 TraceEvent(
                     timestamp=datetime.now(),
-                    action="compact",
+                    operation="compact",
+                    duration_ms=execution_time * 1000,  # Convert to milliseconds
+                    tier=tier or "multiple",
+                    result_count=total_summaries,
+                    success=True,
                     metadata={
-                        "tier": tier or "multiple",
                         "tiers_compacted": tiers_to_compact,
                         "strategy": strategy,
                         "threshold": threshold,
                         "dry_run": dry_run,
                         "summaries_created": total_summaries,
                         "groups_compacted": total_groups
-                    },
-                    result_count=total_summaries,
-                    duration=execution_time
+                    }
                 )
             )
         

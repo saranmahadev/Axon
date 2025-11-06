@@ -589,7 +589,7 @@ class PolicyEngine:
             ...     print(f"No compaction needed: {details['reason']}")
         """
         # Get policy for tier
-        policy = self.tier_policies.get(tier_name)
+        policy = self._policies.get(tier_name)
         if not policy:
             return False, {
                 "tier": tier_name,
@@ -601,12 +601,19 @@ class PolicyEngine:
         
         # Check if compaction is enabled for this tier
         if policy.compaction_threshold is None:
+            # Check if this is because tier has unlimited capacity (no max_entries)
+            if policy.max_entries is None:
+                reason = f"Tier '{tier_name}' has unlimited capacity (no compaction needed)"
+            else:
+                reason = f"Tier '{tier_name}' has no compaction_threshold configured"
+            
             return False, {
                 "tier": tier_name,
                 "current_count": current_count or 0,
                 "threshold": None,
                 "over_threshold": 0,
-                "reason": f"Compaction disabled for tier '{tier_name}' (threshold = None)"
+                "max_entries": policy.max_entries,
+                "reason": reason
             }
         
         # Get current entry count

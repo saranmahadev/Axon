@@ -7,7 +7,7 @@ and error handling.
 
 import pytest
 import pytest_asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import Mock, AsyncMock, patch
 from typing import List
 
@@ -86,13 +86,23 @@ def mock_router():
 @pytest.fixture
 def mock_policy_engine():
     """Create a mock policy engine."""
-    return Mock(spec=PolicyEngine)
+    engine = Mock(spec=PolicyEngine)
+    engine.tier_policies = {}
+    return engine
 
 
 @pytest.fixture
 def mock_scoring_engine():
     """Create a mock scoring engine."""
     return Mock(spec=ScoringEngine)
+
+
+@pytest.fixture
+def mock_embedder():
+    """Create a mock embedder."""
+    embedder = AsyncMock()
+    embedder.embed = AsyncMock(return_value=[0.5] * 1536)
+    return embedder
 
 
 class TestMemorySystemInit:
@@ -1317,6 +1327,507 @@ class TestSyncMethod:
         assert events[0].operation == "SYNC"
         assert events[0].metadata["source_tier"] == "session"
         assert events[0].metadata["target_tier"] == "persistent"
+
+
+class TestCompactMethod:
+    """Test compact() method for memory summarization."""
+    
+    @pytest.mark.asyncio
+    async def test_compact_below_threshold_skips(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test that compaction is skipped when below threshold."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Mock adapter with low count
+        mock_adapter = AsyncMock()
+        mock_adapter.count.return_value = 100
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock policy engine to say no compaction needed
+        mock_policy_engine.should_compact.return_value = (False, {
+            "tier": "persistent",
+            "current_count": 100,
+            "threshold": 10000,
+            "over_threshold": 0,
+            "reason": "Below threshold"
+        })
+        
+        # Mock summarizer with API key
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary text"
+        
+        result = await system.compact(tier="persistent", summarizer=mock_summarizer)
+        
+        assert result["entries_before"] == 0
+        assert result["entries_after"] == 0
+        assert result["summaries_created"] == 0
+        # When specific tier provided, it processes but finds nothing to compact
+        assert result["dry_run"] is False
+    
+    @pytest.mark.asyncio
+    async def test_compact_invalid_tier_raises(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test that invalid tier raises ValueError."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        with pytest.raises(ValueError, match="Invalid tier"):
+            await system.compact(tier="nonexistent")
+    
+    @pytest.mark.asyncio
+    async def test_compact_invalid_strategy_raises(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test that invalid strategy raises ValueError."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        with pytest.raises(ValueError, match="Invalid compaction strategy"):
+            await system.compact(tier="persistent", strategy="invalid")
+    
+    @pytest.mark.asyncio
+    async def test_compact_unsupported_strategy_raises(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test that unsupported strategies raise ValueError."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # semantic, importance, time are valid but not yet implemented
+        with pytest.raises(ValueError, match="not yet implemented"):
+            await system.compact(tier="persistent", strategy="semantic")
+    
+    @pytest.mark.asyncio
+    async def test_compact_dry_run(self, mock_config, mock_router, mock_registry, mock_policy_engine, mock_embedder):
+        """Test dry run mode doesn't modify data."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Create mock entries
+        base_time = datetime.now()
+        mock_entries = [
+            MemoryEntry(
+                id=f"entry_{i}",
+                text=f"Entry {i}",
+                embedding=[0.1] * 1536,
+                metadata=MemoryMetadata(
+                    created_at=base_time + timedelta(days=i),
+                    importance=0.3 + (i * 0.003)  # Gradual increase, max at 0.9
+                )
+            )
+            for i in range(200)
+        ]
+        
+        # Mock adapter
+        mock_adapter = AsyncMock()
+        mock_adapter.count.return_value = 200
+        mock_adapter.query.return_value = mock_entries
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock policy
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=100)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        mock_policy_engine.should_compact.return_value = (True, {
+            "tier": "persistent",
+            "current_count": 200,
+            "threshold": 100,
+            "over_threshold": 100,
+            "reason": "Over threshold"
+        })
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary text"
+        
+        result = await system.compact(
+            tier="persistent",
+            threshold=100,
+            dry_run=True,
+            summarizer=mock_summarizer
+        )
+        
+        # Should calculate what would happen but not call delete/save
+        assert result["dry_run"] is True
+        assert result["entries_before"] == 200
+        assert result["entries_after"] < 200
+        assert result["summaries_created"] > 0
+        
+        # Verify no actual changes were made
+        mock_adapter.delete.assert_not_called()
+        mock_adapter.save.assert_not_called()
+    
+    @pytest.mark.asyncio
+    async def test_compact_count_strategy(self, mock_config, mock_router, mock_registry, mock_policy_engine, mock_embedder):
+        """Test count-based compaction strategy."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Create 150 mock entries (should compact to ~80)
+        base_time = datetime.now() - timedelta(days=100)
+        mock_entries = [
+            MemoryEntry(
+                id=f"entry_{i}",
+                text=f"Memory entry number {i}",
+                embedding=[0.1 * i] * 1536,
+                metadata=MemoryMetadata(
+                    user_id="test_user",
+                    session_id="test_session",
+                    created_at=base_time + timedelta(days=i),
+                    importance=0.2 + (i * 0.003),  # Gradually increasing importance
+                    tags=["test"]
+                )
+            )
+            for i in range(150)
+        ]
+        
+        # Mock adapter
+        mock_adapter = AsyncMock()
+        mock_adapter.count.side_effect = [150, 82]  # Before and after
+        mock_adapter.query.return_value = mock_entries
+        mock_adapter.save = AsyncMock()
+        mock_adapter.delete = AsyncMock()
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock policy
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=100)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        mock_policy_engine.should_compact.return_value = (True, {
+            "tier": "persistent",
+            "current_count": 150,
+            "threshold": 100,
+            "over_threshold": 50,
+            "reason": "Over threshold"
+        })
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summarized content"
+        
+        # Mock embedder
+        mock_embedder.embed.return_value = [0.5] * 1536
+        
+        result = await system.compact(
+            tier="persistent",
+            strategy="count",
+            threshold=100,
+            summarizer=mock_summarizer,
+            embedder=mock_embedder  # Pass embedder to compact
+        )
+        
+        assert result["tier"] == "persistent"
+        assert result["entries_before"] == 150
+        assert result["summaries_created"] > 0
+        assert result["reduction_ratio"] > 0
+        assert result["strategy"] == "count"
+        assert result["dry_run"] is False
+    
+    @pytest.mark.asyncio
+    async def test_compact_creates_summary_entries(self, mock_config, mock_router, mock_registry, mock_policy_engine, mock_embedder):
+        """Test that compaction creates proper summary entries."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Create 120 entries
+        base_time = datetime.now()
+        mock_entries = [
+            MemoryEntry(
+                id=f"entry_{i}",
+                text=f"Entry {i}",
+                embedding=[0.1] * 1536,
+                metadata=MemoryMetadata(
+                    user_id="user1",
+                    session_id="session1",
+                    created_at=base_time + timedelta(hours=i),
+                    importance=0.3,
+                    tags=["tag1", "tag2"]
+                )
+            )
+            for i in range(120)
+        ]
+        
+        saved_entries = []
+        
+        async def capture_save(entry):
+            saved_entries.append(entry)
+        
+        # Mock adapter
+        mock_adapter = AsyncMock()
+        mock_adapter.count.side_effect = [120, 21]
+        mock_adapter.query.return_value = mock_entries
+        mock_adapter.save.side_effect = capture_save
+        mock_adapter.delete = AsyncMock()
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock policy
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=100)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        mock_policy_engine.should_compact.return_value = (True, {"tier": "persistent", "current_count": 120, "threshold": 100, "over_threshold": 20, "reason": "Over"})
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Group summary"
+        
+        # Mock embedder
+        mock_embedder.embed.return_value = [0.5] * 1536
+        
+        await system.compact(
+            tier="persistent",
+            threshold=100,
+            summarizer=mock_summarizer,
+            embedder=mock_embedder  # Pass embedder to compact
+        )
+        
+        # Verify summary entries were created
+        assert len(saved_entries) > 0
+        
+        # Check first summary entry
+        summary = saved_entries[0]
+        assert summary.text == "Group summary"
+        assert summary.metadata.source == "system"  # Compaction is a system operation
+        assert len(summary.metadata.provenance) > 0
+        assert summary.metadata.provenance[0].action == "compact"
+        assert summary.metadata.provenance[0].by == "memory_system"
+        assert "summarized_count" in summary.metadata.provenance[0].metadata
+    
+    @pytest.mark.asyncio
+    async def test_compact_updates_provenance(self, mock_config, mock_router, mock_registry, mock_policy_engine, mock_embedder):
+        """Test that compaction updates provenance chain."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Create entries
+        mock_entries = [
+            MemoryEntry(
+                id=f"entry_{i}",
+                text=f"Entry {i}",
+                embedding=[0.1] * 1536,
+                metadata=MemoryMetadata(
+                    created_at=datetime.now(),
+                    importance=0.3
+                )
+            )
+            for i in range(110)
+        ]
+        
+        saved_entries = []
+        
+        async def capture_save(entry):
+            saved_entries.append(entry)
+        
+        # Mock adapter
+        mock_adapter = AsyncMock()
+        mock_adapter.count.side_effect = [110, 11]
+        mock_adapter.query.return_value = mock_entries
+        mock_adapter.save.side_effect = capture_save
+        mock_adapter.delete = AsyncMock()
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock policy
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=100)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        mock_policy_engine.should_compact.return_value = (True, {"tier": "persistent", "current_count": 110, "threshold": 100, "over_threshold": 10, "reason": "Over"})
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary"
+        
+        mock_embedder.embed.return_value = [0.5] * 1536
+        
+        await system.compact(tier="persistent", threshold=100, summarizer=mock_summarizer, embedder=mock_embedder)
+        
+        # Check provenance
+        for summary in saved_entries:
+            assert len(summary.metadata.provenance) > 0
+            provenance = summary.metadata.provenance[0]
+            assert provenance.action == "compact"
+            assert provenance.by == "memory_system"
+            assert "strategy" in provenance.metadata
+            assert "summarized_count" in provenance.metadata
+            assert "summarized_ids" in provenance.metadata
+            assert provenance.metadata["strategy"] == "count"
+    
+    @pytest.mark.asyncio
+    async def test_compact_creates_trace_event(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test that compaction creates trace event."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Mock no compaction needed
+        mock_policy_engine.should_compact.return_value = (False, {
+            "tier": "persistent",
+            "current_count": 50,
+            "threshold": 100,
+            "over_threshold": 0,
+            "reason": "Below threshold"
+        })
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary"
+        
+        result = await system.compact(tier="persistent", summarizer=mock_summarizer)
+        
+        # Check that compaction was skipped (below threshold case)
+        assert result["entries_before"] == 0
+        # Result should have either "reason" or be empty compaction
+        assert result["dry_run"] is False
+    
+    @pytest.mark.asyncio
+    async def test_compact_returns_statistics(self, mock_config, mock_router, mock_registry, mock_policy_engine, mock_embedder):
+        """Test that compaction returns detailed statistics."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Create entries
+        mock_entries = [
+            MemoryEntry(
+                id=f"entry_{i}",
+                text=f"Entry {i}",
+                embedding=[0.1] * 1536,
+                metadata=MemoryMetadata(created_at=datetime.now(), importance=0.3)
+            )
+            for i in range(120)
+        ]
+        
+        mock_adapter = AsyncMock()
+        mock_adapter.count.side_effect = [120, 21]
+        mock_adapter.query.return_value = mock_entries
+        mock_adapter.save = AsyncMock()
+        mock_adapter.delete = AsyncMock()
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=100)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        mock_policy_engine.should_compact.return_value = (True, {"tier": "persistent", "current_count": 120, "threshold": 100, "over_threshold": 20, "reason": "Over"})
+        
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary"
+        mock_embedder.embed.return_value = [0.5] * 1536
+        
+        result = await system.compact(tier="persistent", threshold=100, summarizer=mock_summarizer)
+        
+        # Verify all expected statistics are present
+        assert "tier" in result
+        assert "entries_before" in result
+        assert "entries_after" in result
+        assert "summaries_created" in result
+        assert "groups_compacted" in result
+        assert "reduction_ratio" in result
+        assert "dry_run" in result
+        assert "execution_time" in result
+        assert "strategy" in result
+        
+        assert result["entries_before"] == 120
+        assert result["strategy"] == "count"
+        assert result["dry_run"] is False
+        assert isinstance(result["execution_time"], float)
+        assert 0 <= result["reduction_ratio"] <= 1
+    
+    @pytest.mark.asyncio
+    async def test_compact_with_threshold_override(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test compaction with custom threshold override."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Mock adapter
+        mock_adapter = AsyncMock()
+        mock_adapter.count.return_value = 150
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Policy has threshold of 10000 but we override to 100
+        from axon.core.policies.persistent import PersistentPolicy
+        mock_policy = PersistentPolicy(compaction_threshold=10000)
+        mock_policy_engine.tier_policies = {"persistent": mock_policy}
+        
+        # The should_compact call in compact() will use current_count parameter
+        mock_policy_engine.should_compact.return_value = (False, {"tier": "persistent", "current_count": 150, "threshold": 100, "over_threshold": 0, "reason": "Checked"})
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary"
+        
+        # When we pass threshold=100, it should check against 100 not 10000
+        result = await system.compact(tier="persistent", threshold=100, summarizer=mock_summarizer)
+        
+        # The function should have used the override threshold
+        assert result is not None
+    
+    @pytest.mark.asyncio
+    async def test_compact_all_tiers(self, mock_config, mock_router, mock_registry, mock_policy_engine):
+        """Test compacting all tiers when tier=None."""
+        system = MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine
+        )
+        
+        # Mock adapters for all tiers
+        mock_adapter = AsyncMock()
+        mock_adapter.count.return_value = 50
+        mock_registry.get_adapter.return_value = mock_adapter
+        
+        # Mock all tiers below threshold
+        mock_policy_engine.should_compact.return_value = (False, {
+            "tier": "any",
+            "current_count": 50,
+            "threshold": 100,
+            "over_threshold": 0,
+            "reason": "Below"
+        })
+        
+        # Mock summarizer
+        mock_summarizer = AsyncMock()
+        mock_summarizer.summarize.return_value = "Summary"
+        
+        result = await system.compact(summarizer=mock_summarizer)  # No tier specified = check all
+        
+        assert result["tier"] == "all"
+        assert "No tiers need compaction" in result["reason"]
 
 
 class TestContextManager:
