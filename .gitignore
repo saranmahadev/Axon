@@ -69,3 +69,4 @@ Thumbs.db
 .sprints/*.tmp
 demo_knowledge_db/
 qdrant_storage/
+chroma_db/

@@ -103,7 +103,8 @@ class MemorySystem:
         router: Optional[Router] = None,
         registry: Optional[AdapterRegistry] = None,
         policy_engine: Optional[PolicyEngine] = None,
-        scoring_engine: Optional[ScoringEngine] = None
+        scoring_engine: Optional[ScoringEngine] = None,
+        embedder: Optional[Any] = None
     ):
         """
         Initialize MemorySystem with configuration and optional components.
@@ -118,6 +119,7 @@ class MemorySystem:
             registry: Optional pre-configured AdapterRegistry instance
             policy_engine: Optional pre-configured PolicyEngine instance
             scoring_engine: Optional pre-configured ScoringEngine instance
+            embedder: Optional Embedder instance for generating embeddings (required for vector adapters)
             
         Raises:
             ValueError: If config is invalid or missing required tiers
@@ -130,6 +132,7 @@ class MemorySystem:
             raise ValueError("config must define at least a persistent tier")
         
         self.config = config
+        self.embedder = embedder
         
         # Initialize or use provided components
         self.registry = registry or AdapterRegistry()
@@ -281,6 +284,11 @@ class MemorySystem:
                 text=content,
                 metadata=entry_metadata
             )
+            
+            # Generate embedding if embedder is available
+            if self.embedder:
+                embedding = await self.embedder.embed(content)
+                entry.embedding = embedding
             
             # Store via router (handles tier selection if tier not specified)
             await self.router.route_store(entry, tier=tier)
@@ -1149,7 +1157,7 @@ class MemorySystem:
             # Check all tiers
             for tier_name in self.config.tiers.keys():
                 adapter = await self.registry.get_adapter(tier_name)
-                current_count = await adapter.count()
+                current_count = adapter.count()
                 should_compact, details = self.policy_engine.should_compact(
                     tier_name, current_count
                 )
@@ -1216,7 +1224,7 @@ class MemorySystem:
                     continue  # Skip if no threshold
             
             # Get current count
-            current_count = await adapter.count()
+            current_count = adapter.count()
             total_before += current_count
             
             # Check if compaction is needed
@@ -1234,7 +1242,7 @@ class MemorySystem:
             
             # Query all entries
             all_entries = await adapter.query(
-                query_vector=[0.0] * 1536,  # Dummy vector
+                vector=[0.0] * 1536,  # Dummy vector
                 k=current_count,
                 filter=None
             )
@@ -1296,8 +1304,9 @@ class MemorySystem:
                     # Create summary entry
                     summary_entry = MemoryEntry(
                         id=str(uuid.uuid4()),
+                        type=MemoryEntryType.EMBEDDING_SUMMARY,  # Correct field name
                         text=summary_text,
-                        embedding=None,  # No embedding yet (will be generated on save)
+                        embedding=None,  # No embedding yet (will be generated below)
                         metadata=MemoryMetadata(
                             user_id=group[0].metadata.user_id,
                             session_id=group[0].metadata.session_id,
@@ -1309,8 +1318,7 @@ class MemorySystem:
                             importance=avg_importance,
                             version="1.0",
                             provenance=[provenance]
-                        ),
-                        entry_type=MemoryEntryType.EMBEDDING_SUMMARY  # Correct enum value
+                        )
                     )
                     
                     # Generate embedding for summary (if embedder provided)
@@ -1344,7 +1352,7 @@ class MemorySystem:
                         logger.error(f"Failed to save summary entry: {e}")
             
             # Update count
-            new_count = await adapter.count()
+            new_count = adapter.count()
             total_after += new_count
         
         # Calculate statistics
