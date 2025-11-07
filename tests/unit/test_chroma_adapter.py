@@ -33,16 +33,13 @@ def temp_chroma_dir():
 @pytest.fixture
 def adapter(temp_chroma_dir):
     """Create a ChromaDB adapter with temporary storage."""
-    adapter = ChromaAdapter(
-        collection_name="test_memories",
-        persist_directory=temp_chroma_dir
-    )
+    adapter = ChromaAdapter(collection_name="test_memories", persist_directory=temp_chroma_dir)
     yield adapter
     # Explicitly close the client to release file handles
     try:
         adapter.client._producer.stop()
         adapter.client._consumer.stop()
-    except:
+    except Exception:  # Cleanup may fail if already stopped
         pass
 
 
@@ -59,7 +56,7 @@ def sample_entry():
             source="app",
             tags=["python", "ai"],
             importance=0.8,
-        )
+        ),
     )
 
 
@@ -75,7 +72,7 @@ def sample_entries():
                 user_id="user1",
                 tags=["python", "ai"],
                 importance=0.9,
-            )
+            ),
         ),
         MemoryEntry(
             type="note",
@@ -85,7 +82,7 @@ def sample_entries():
                 user_id="user1",
                 tags=["javascript", "web"],
                 importance=0.7,
-            )
+            ),
         ),
         MemoryEntry(
             type="conversation_turn",
@@ -95,7 +92,7 @@ def sample_entries():
                 user_id="user2",
                 tags=["rust", "systems"],
                 importance=0.6,
-            )
+            ),
         ),
     ]
 
@@ -105,10 +102,7 @@ class TestChromaAdapterInit:
 
     def test_init_creates_collection(self, temp_chroma_dir):
         """Test that initialization creates a collection."""
-        adapter = ChromaAdapter(
-            collection_name="test_init",
-            persist_directory=temp_chroma_dir
-        )
+        adapter = ChromaAdapter(collection_name="test_init", persist_directory=temp_chroma_dir)
         try:
             assert adapter.collection_name == "test_init"
             assert adapter.persist_directory == temp_chroma_dir
@@ -118,16 +112,13 @@ class TestChromaAdapterInit:
             try:
                 adapter.client._producer.stop()
                 adapter.client._consumer.stop()
-            except:
+            except Exception:  # Cleanup may fail if already stopped
                 pass
             time.sleep(0.1)
 
     def test_init_persists_to_disk(self, temp_chroma_dir):
         """Test that ChromaDB creates persistent storage."""
-        adapter = ChromaAdapter(
-            collection_name="test_persist",
-            persist_directory=temp_chroma_dir
-        )
+        adapter = ChromaAdapter(collection_name="test_persist", persist_directory=temp_chroma_dir)
         try:
             # Check that directory was created
             assert Path(temp_chroma_dir).exists()
@@ -137,29 +128,23 @@ class TestChromaAdapterInit:
             try:
                 adapter.client._producer.stop()
                 adapter.client._consumer.stop()
-            except:
+            except Exception:  # Cleanup may fail if already stopped
                 pass
             time.sleep(0.1)
 
     def test_init_reuses_existing_collection(self, temp_chroma_dir):
         """Test that re-initializing uses existing collection."""
-        adapter1 = ChromaAdapter(
-            collection_name="reuse_test",
-            persist_directory=temp_chroma_dir
-        )
+        adapter1 = ChromaAdapter(collection_name="reuse_test", persist_directory=temp_chroma_dir)
         count1 = adapter1.count()
         try:
             adapter1.client._producer.stop()
             adapter1.client._consumer.stop()
-        except:
+        except Exception:  # Cleanup may fail if already stopped
             pass
         time.sleep(0.1)
-        
+
         # Create new adapter instance
-        adapter2 = ChromaAdapter(
-            collection_name="reuse_test",
-            persist_directory=temp_chroma_dir
-        )
+        adapter2 = ChromaAdapter(collection_name="reuse_test", persist_directory=temp_chroma_dir)
         try:
             count2 = adapter2.count()
             assert count1 == count2  # Should have same data
@@ -167,7 +152,7 @@ class TestChromaAdapterInit:
             try:
                 adapter2.client._producer.stop()
                 adapter2.client._consumer.stop()
-            except:
+            except Exception:  # Cleanup may fail if already stopped
                 pass
             time.sleep(0.1)
 
@@ -186,10 +171,7 @@ class TestChromaAdapterSave:
     async def test_save_without_embedding_raises_error(self, adapter):
         """Test that saving without embedding raises error."""
         entry = MemoryEntry(
-            type="note",
-            text="No embedding",
-            embedding=None,
-            metadata=MemoryMetadata()
+            type="note", text="No embedding", embedding=None, metadata=MemoryMetadata()
         )
         with pytest.raises(ValueError, match="must have an embedding"):
             await adapter.save(entry)
@@ -206,15 +188,15 @@ class TestChromaAdapterSave:
         # Save original
         await adapter.save(sample_entry)
         assert adapter.count() == 1
-        
+
         # Modify and save again
         sample_entry.text = "Updated text"
         sample_entry.embedding = [0.5, 0.4, 0.3, 0.2, 0.1]
         await adapter.save(sample_entry)
-        
+
         # Should still have 1 entry (upserted, not duplicated)
         assert adapter.count() == 1
-        
+
         # Verify updated content
         retrieved = await adapter.get(sample_entry.id)
         assert retrieved.text == "Updated text"
@@ -243,15 +225,15 @@ class TestChromaAdapterSave:
                         action="created",
                         by="test_user",
                         timestamp=datetime.now(),
-                        details={"tool": "test"}
+                        details={"tool": "test"},
                     )
-                ]
-            )
+                ],
+            ),
         )
-        
+
         await adapter.save(entry)
         retrieved = await adapter.get(entry.id)
-        
+
         assert retrieved.metadata.user_id == "user123"
         assert retrieved.metadata.session_id == "session456"
         assert retrieved.metadata.source == "app"
@@ -278,11 +260,11 @@ class TestChromaAdapterQuery:
         """Test that query returns semantically similar entries."""
         # Save all entries
         await adapter.bulk_save(sample_entries)
-        
+
         # Query with vector similar to first entry (Python/AI)
         query_vector = [0.95, 0.05, 0.0, 0.0, 0.0]
         results = await adapter.query(query_vector, k=2)
-        
+
         assert len(results) <= 2
         assert results[0].text == "Python is great for AI"
 
@@ -290,7 +272,7 @@ class TestChromaAdapterQuery:
     async def test_query_respects_k_limit(self, adapter, sample_entries):
         """Test that query returns at most k results."""
         await adapter.bulk_save(sample_entries)
-        
+
         results = await adapter.query([0.1] * 5, k=2)
         assert len(results) <= 2
 
@@ -316,10 +298,10 @@ class TestChromaAdapterQuery:
     async def test_query_with_user_filter(self, adapter, sample_entries):
         """Test filtering by user_id."""
         await adapter.bulk_save(sample_entries)
-        
+
         filter = Filter(user_id="user1")
         results = await adapter.query([0.1] * 5, k=10, filter=filter)
-        
+
         assert len(results) == 2
         assert all(r.metadata.user_id == "user1" for r in results)
 
@@ -327,10 +309,10 @@ class TestChromaAdapterQuery:
     async def test_query_with_importance_filter(self, adapter, sample_entries):
         """Test filtering by importance range."""
         await adapter.bulk_save(sample_entries)
-        
+
         filter = Filter(min_importance=0.7, max_importance=1.0)
         results = await adapter.query([0.1] * 5, k=10, filter=filter)
-        
+
         assert len(results) == 2  # Should get entries with importance >= 0.7
         assert all(r.metadata.importance >= 0.7 for r in results)
 
@@ -338,10 +320,10 @@ class TestChromaAdapterQuery:
     async def test_query_with_tags_filter(self, adapter, sample_entries):
         """Test filtering by tags."""
         await adapter.bulk_save(sample_entries)
-        
+
         filter = Filter(tags=["python"])
         results = await adapter.query([0.1] * 5, k=10, filter=filter)
-        
+
         assert len(results) == 1
         assert "python" in results[0].metadata.tags
 
@@ -349,31 +331,24 @@ class TestChromaAdapterQuery:
     async def test_query_with_date_filter(self, adapter, sample_entries):
         """Test filtering by date range."""
         await adapter.bulk_save(sample_entries)
-        
+
         # Filter for entries from last hour
         now = datetime.now()
         filter = Filter(
-            date_range=DateRange(
-                start=now - timedelta(hours=1),
-                end=now + timedelta(hours=1)
-            )
+            date_range=DateRange(start=now - timedelta(hours=1), end=now + timedelta(hours=1))
         )
         results = await adapter.query([0.1] * 5, k=10, filter=filter)
-        
+
         assert len(results) == 3  # All entries were just created
 
     @pytest.mark.asyncio
     async def test_query_with_multiple_filters(self, adapter, sample_entries):
         """Test combining multiple filters."""
         await adapter.bulk_save(sample_entries)
-        
-        filter = Filter(
-            user_id="user1",
-            min_importance=0.8,
-            max_importance=1.0
-        )
+
+        filter = Filter(user_id="user1", min_importance=0.8, max_importance=1.0)
         results = await adapter.query([0.1] * 5, k=10, filter=filter)
-        
+
         assert len(results) == 1  # Only Python entry matches both
         assert results[0].metadata.user_id == "user1"
         assert results[0].metadata.importance >= 0.8
@@ -393,7 +368,7 @@ class TestChromaAdapterGet:
         """Test retrieving an existing entry by ID."""
         await adapter.save(sample_entry)
         retrieved = await adapter.get(sample_entry.id)
-        
+
         assert retrieved.id == sample_entry.id
         assert retrieved.text == sample_entry.text
         assert retrieved.type == sample_entry.type
@@ -423,7 +398,7 @@ class TestChromaAdapterDelete:
         """Test deleting an existing entry."""
         await adapter.save(sample_entry)
         assert adapter.count() == 1
-        
+
         result = await adapter.delete(sample_entry.id)
         assert result is True
         assert adapter.count() == 0
@@ -439,7 +414,7 @@ class TestChromaAdapterDelete:
         """Test that deleted entry cannot be retrieved."""
         await adapter.save(sample_entry)
         await adapter.delete(sample_entry.id)
-        
+
         with pytest.raises(KeyError):
             await adapter.get(sample_entry.id)
 
@@ -457,7 +432,7 @@ class TestChromaAdapterBulkSave:
     async def test_bulk_save_multiple_entries(self, adapter, sample_entries):
         """Test saving multiple entries at once."""
         ids = await adapter.bulk_save(sample_entries)
-        
+
         assert len(ids) == 3
         assert adapter.count() == 3
 
@@ -471,7 +446,7 @@ class TestChromaAdapterBulkSave:
     async def test_bulk_save_preserves_all_entries(self, adapter, sample_entries):
         """Test that all bulk saved entries can be retrieved."""
         ids = await adapter.bulk_save(sample_entries)
-        
+
         for entry_id in ids:
             retrieved = await adapter.get(entry_id)
             assert retrieved is not None
@@ -490,9 +465,9 @@ class TestChromaAdapterReindex:
         """Test that reindex doesn't break anything (it's a no-op)."""
         await adapter.bulk_save(sample_entries)
         count_before = adapter.count()
-        
+
         await adapter.reindex()
-        
+
         count_after = adapter.count()
         assert count_before == count_after
 
@@ -522,14 +497,14 @@ class TestChromaAdapterUtilities:
         """Test that list_ids returns all entry IDs."""
         saved_ids = adapter.bulk_save_sync(sample_entries)
         listed_ids = adapter.list_ids()
-        
+
         assert set(listed_ids) == set(saved_ids)
 
     def test_clear_removes_all_entries(self, adapter, sample_entries):
         """Test that clear removes all entries."""
         adapter.bulk_save_sync(sample_entries)
         assert adapter.count() == 3
-        
+
         adapter.clear()
         assert adapter.count() == 0
 
@@ -540,28 +515,22 @@ class TestChromaAdapterPersistence:
     def test_data_persists_across_instances(self, temp_chroma_dir, sample_entry):
         """Test that data persists when adapter is recreated."""
         # Save with first adapter
-        adapter1 = ChromaAdapter(
-            collection_name="persist_test",
-            persist_directory=temp_chroma_dir
-        )
+        adapter1 = ChromaAdapter(collection_name="persist_test", persist_directory=temp_chroma_dir)
         adapter1.save_sync(sample_entry)
         count1 = adapter1.count()
         try:
             adapter1.client._producer.stop()
             adapter1.client._consumer.stop()
-        except:
+        except Exception:  # Cleanup may fail if already stopped
             pass
         time.sleep(0.1)
-        
+
         # Create new adapter instance
-        adapter2 = ChromaAdapter(
-            collection_name="persist_test",
-            persist_directory=temp_chroma_dir
-        )
+        adapter2 = ChromaAdapter(collection_name="persist_test", persist_directory=temp_chroma_dir)
         try:
             count2 = adapter2.count()
             assert count1 == count2 == 1
-            
+
             # Verify data is accessible
             retrieved = adapter2.get_sync(sample_entry.id)
             assert retrieved.text == sample_entry.text
@@ -569,7 +538,7 @@ class TestChromaAdapterPersistence:
             try:
                 adapter2.client._producer.stop()
                 adapter2.client._consumer.stop()
-            except:
+            except Exception:  # Cleanup may fail if already stopped
                 pass
             time.sleep(0.1)
 
@@ -581,12 +550,9 @@ class TestChromaAdapterEdgeCases:
     async def test_unicode_text_handling(self, adapter):
         """Test that unicode text is handled correctly."""
         entry = MemoryEntry(
-            type="note",
-            text="Hello 世界 🌍 Привет",
-            embedding=[0.1] * 5,
-            metadata=MemoryMetadata()
+            type="note", text="Hello 世界 🌍 Привет", embedding=[0.1] * 5, metadata=MemoryMetadata()
         )
-        
+
         await adapter.save(entry)
         retrieved = await adapter.get(entry.id)
         assert retrieved.text == "Hello 世界 🌍 Привет"
@@ -598,9 +564,9 @@ class TestChromaAdapterEdgeCases:
             type="note",
             text="Large embedding test",
             embedding=[0.001] * 1536,
-            metadata=MemoryMetadata()
+            metadata=MemoryMetadata(),
         )
-        
+
         await adapter.save(entry)
         retrieved = await adapter.get(entry.id)
         assert len(retrieved.embedding) == 1536
@@ -609,12 +575,9 @@ class TestChromaAdapterEdgeCases:
     async def test_empty_tags_list(self, adapter):
         """Test handling of empty tags list."""
         entry = MemoryEntry(
-            type="note",
-            text="No tags",
-            embedding=[0.1] * 5,
-            metadata=MemoryMetadata(tags=[])
+            type="note", text="No tags", embedding=[0.1] * 5, metadata=MemoryMetadata(tags=[])
         )
-        
+
         await adapter.save(entry)
         retrieved = await adapter.get(entry.id)
         assert retrieved.metadata.tags == []
@@ -626,9 +589,9 @@ class TestChromaAdapterEdgeCases:
             type="note",
             text="Minimal metadata",
             embedding=[0.1] * 5,
-            metadata=MemoryMetadata()  # Use defaults
+            metadata=MemoryMetadata(),  # Use defaults
         )
-        
+
         await adapter.save(entry)
         retrieved = await adapter.get(entry.id)
         assert retrieved.metadata.user_id is None

@@ -49,9 +49,7 @@ class MemoryMetadata(BaseModel):
         default_factory=lambda: datetime.now(timezone.utc),
         description="Creation timestamp (ISO8601)",
     )
-    last_accessed_at: datetime | None = Field(
-        None, description="Last access timestamp (ISO8601)"
-    )
+    last_accessed_at: datetime | None = Field(None, description="Last access timestamp (ISO8601)")
 
     # Categorization and scoring
     tags: list[str] = Field(default_factory=list, description="Tags for categorization")

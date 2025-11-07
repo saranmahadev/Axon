@@ -6,7 +6,7 @@ Sentence Transformers, HuggingFace) with mocked API calls.
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock, Mock, patch
+from unittest.mock import Mock, patch
 
 import pytest
 
@@ -34,10 +34,10 @@ class TestEmbeddingCache:
         """Test storing and retrieving embeddings."""
         cache = EmbeddingCache()
         embedding = [0.1, 0.2, 0.3]
-        
+
         cache.put("test text", "model-1", embedding)
         result = cache.get("test text", "model-1")
-        
+
         assert result == embedding
         assert cache._hits == 1
         assert cache._misses == 0
@@ -46,7 +46,7 @@ class TestEmbeddingCache:
         """Test cache miss for non-existent key."""
         cache = EmbeddingCache()
         result = cache.get("nonexistent", "model-1")
-        
+
         assert result is None
         assert cache._misses == 1
 
@@ -55,10 +55,10 @@ class TestEmbeddingCache:
         cache = EmbeddingCache()
         embedding1 = [0.1, 0.2]
         embedding2 = [0.3, 0.4]
-        
+
         cache.put("same text", "model-1", embedding1)
         cache.put("same text", "model-2", embedding2)
-        
+
         assert cache.get("same text", "model-1") == embedding1
         assert cache.get("same text", "model-2") == embedding2
 
@@ -67,9 +67,9 @@ class TestEmbeddingCache:
         cache = EmbeddingCache()
         cache.put("text", "model", [0.1, 0.2])
         cache.get("text", "model")  # Hit
-        
+
         cache.clear()
-        
+
         assert cache.get("text", "model") is None
         assert cache._hits == 0
         assert cache._misses == 1
@@ -80,7 +80,7 @@ class TestEmbeddingCache:
         cache.put("text1", "model", [0.1])
         cache.get("text1", "model")  # Hit
         cache.get("text2", "model")  # Miss
-        
+
         stats = cache.get_stats()
         assert stats["hits"] == 1
         assert stats["misses"] == 1
@@ -118,13 +118,9 @@ class TestOpenAIEmbedder:
 
     def test_model_dimensions(self):
         """Test different model dimensions."""
-        embedder_small = OpenAIEmbedder(
-            api_key="sk-test", model="text-embedding-3-small"
-        )
-        embedder_large = OpenAIEmbedder(
-            api_key="sk-test", model="text-embedding-3-large"
-        )
-        
+        embedder_small = OpenAIEmbedder(api_key="sk-test", model="text-embedding-3-small")
+        embedder_large = OpenAIEmbedder(api_key="sk-test", model="text-embedding-3-large")
+
         assert embedder_small.get_dimension() == 1536
         assert embedder_large.get_dimension() == 3072
 
@@ -132,7 +128,7 @@ class TestOpenAIEmbedder:
     async def test_embed(self, mock_openai_response):
         """Test single text embedding."""
         embedder = OpenAIEmbedder(api_key="sk-test", cache_enabled=False)
-        
+
         with patch.object(
             embedder._async_client.embeddings,
             "create",
@@ -146,7 +142,7 @@ class TestOpenAIEmbedder:
     async def test_embed_empty_text(self):
         """Test that empty text raises error."""
         embedder = OpenAIEmbedder(api_key="sk-test")
-        
+
         with pytest.raises(ValueError, match="Text cannot be empty"):
             await embedder.embed("")
 
@@ -155,7 +151,7 @@ class TestOpenAIEmbedder:
         """Test caching behavior."""
         clear_global_cache()
         embedder = OpenAIEmbedder(api_key="sk-test", cache_enabled=True)
-        
+
         with patch.object(
             embedder._async_client.embeddings,
             "create",
@@ -164,7 +160,7 @@ class TestOpenAIEmbedder:
             # First call - should hit API
             embedding1 = await embedder.embed("test text")
             assert mock_create.call_count == 1
-            
+
             # Second call - should use cache
             embedding2 = await embedder.embed("test text")
             assert mock_create.call_count == 1  # No additional API call
@@ -174,7 +170,7 @@ class TestOpenAIEmbedder:
     async def test_embed_batch(self):
         """Test batch embedding."""
         embedder = OpenAIEmbedder(api_key="sk-test", cache_enabled=False)
-        
+
         # Mock response with multiple embeddings
         mock_response = Mock()
         mock_response.data = [
@@ -182,7 +178,7 @@ class TestOpenAIEmbedder:
             Mock(embedding=[0.2] * 1536),
             Mock(embedding=[0.3] * 1536),
         ]
-        
+
         with patch.object(
             embedder._async_client.embeddings,
             "create",
@@ -195,7 +191,7 @@ class TestOpenAIEmbedder:
     def test_sync_wrapper(self, mock_openai_response):
         """Test synchronous embed wrapper."""
         embedder = OpenAIEmbedder(api_key="sk-test", cache_enabled=False)
-        
+
         with patch.object(
             embedder._async_client.embeddings,
             "create",
@@ -231,7 +227,7 @@ class TestVoyageAIEmbedder:
     async def test_embed(self, mock_voyage_response):
         """Test single text embedding."""
         embedder = VoyageAIEmbedder(api_key="pa-test", cache_enabled=False)
-        
+
         with patch.object(embedder._client, "embed", return_value=mock_voyage_response):
             embedding = await embedder.embed("test text")
             assert len(embedding) == 1024
@@ -240,10 +236,10 @@ class TestVoyageAIEmbedder:
     async def test_embed_batch(self, mock_voyage_response):
         """Test batch embedding."""
         embedder = VoyageAIEmbedder(api_key="pa-test", cache_enabled=False)
-        
+
         # Mock multiple embeddings
         mock_voyage_response.embeddings = [[0.1] * 1024, [0.2] * 1024]
-        
+
         with patch.object(embedder._client, "embed", return_value=mock_voyage_response):
             embeddings = await embedder.embed_batch(["text1", "text2"])
             assert len(embeddings) == 2
@@ -263,7 +259,9 @@ class TestSentenceTransformerEmbedder:
 
     def test_initialization(self, mock_st_model):
         """Test Sentence Transformer embedder initialization."""
-        with patch("axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model):
+        with patch(
+            "axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model
+        ):
             embedder = SentenceTransformerEmbedder("all-MiniLM-L6-v2")
             assert embedder.model_name == "all-MiniLM-L6-v2"
             assert embedder.get_dimension() == 384
@@ -271,7 +269,9 @@ class TestSentenceTransformerEmbedder:
     @pytest.mark.asyncio
     async def test_embed(self, mock_st_model):
         """Test single text embedding."""
-        with patch("axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model):
+        with patch(
+            "axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model
+        ):
             embedder = SentenceTransformerEmbedder("all-MiniLM-L6-v2", cache_enabled=False)
             embedding = await embedder.embed("test text")
             assert len(embedding) == 384
@@ -281,10 +281,13 @@ class TestSentenceTransformerEmbedder:
         """Test batch embedding."""
         # Mock batch encoding
         import numpy as np
+
         mock_embeddings = np.array([[0.1] * 384, [0.2] * 384])
         mock_st_model.encode.return_value = mock_embeddings
-        
-        with patch("axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model):
+
+        with patch(
+            "axon.embedders.sentence_transformer.SentenceTransformer", return_value=mock_st_model
+        ):
             embedder = SentenceTransformerEmbedder("all-MiniLM-L6-v2", cache_enabled=False)
             embeddings = await embedder.embed_batch(["text1", "text2"])
             assert len(embeddings) == 2
@@ -298,28 +301,32 @@ class TestHuggingFaceEmbedder:
     def mock_hf_components(self):
         """Create mock HuggingFace components."""
         import torch
-        
+
         mock_tokenizer = Mock()
         mock_tokenizer.return_value = {
             "input_ids": torch.tensor([[1, 2, 3]]),
             "attention_mask": torch.tensor([[1, 1, 1]]),
         }
-        
+
         mock_model = Mock()
         mock_model.config.hidden_size = 768
         mock_output = (torch.randn(1, 3, 768),)  # (batch, seq_len, hidden_size)
         mock_model.return_value = mock_output
         mock_model.to.return_value = mock_model
         mock_model.eval.return_value = None
-        
+
         return mock_tokenizer, mock_model
 
     def test_initialization(self, mock_hf_components):
         """Test HuggingFace embedder initialization."""
         mock_tokenizer, mock_model = mock_hf_components
-        
-        with patch("axon.embedders.huggingface.AutoTokenizer.from_pretrained", return_value=mock_tokenizer):
-            with patch("axon.embedders.huggingface.AutoModel.from_pretrained", return_value=mock_model):
+
+        with patch(
+            "axon.embedders.huggingface.AutoTokenizer.from_pretrained", return_value=mock_tokenizer
+        ):
+            with patch(
+                "axon.embedders.huggingface.AutoModel.from_pretrained", return_value=mock_model
+            ):
                 embedder = HuggingFaceEmbedder("BAAI/bge-base-en-v1.5")
                 assert embedder.model_name == "BAAI/bge-base-en-v1.5"
                 assert embedder.get_dimension() == 768
@@ -328,9 +335,13 @@ class TestHuggingFaceEmbedder:
     async def test_embed(self, mock_hf_components):
         """Test single text embedding."""
         mock_tokenizer, mock_model = mock_hf_components
-        
-        with patch("axon.embedders.huggingface.AutoTokenizer.from_pretrained", return_value=mock_tokenizer):
-            with patch("axon.embedders.huggingface.AutoModel.from_pretrained", return_value=mock_model):
+
+        with patch(
+            "axon.embedders.huggingface.AutoTokenizer.from_pretrained", return_value=mock_tokenizer
+        ):
+            with patch(
+                "axon.embedders.huggingface.AutoModel.from_pretrained", return_value=mock_model
+            ):
                 embedder = HuggingFaceEmbedder("BAAI/bge-base-en-v1.5", cache_enabled=False)
                 embedding = await embedder.embed("test text")
                 assert len(embedding) == 768
@@ -354,7 +365,7 @@ class TestEmbedderInterface:
             OpenAIEmbedder(api_key="sk-test"),
             VoyageAIEmbedder(api_key="pa-test"),
         ]
-        
+
         for embedder in embedders:
             assert hasattr(embedder, "embed")
             assert hasattr(embedder, "embed_batch")

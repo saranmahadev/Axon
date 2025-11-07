@@ -6,8 +6,8 @@ behavior for ephemeral, session, and persistent memory tiers.
 """
 
 from .ephemeral import EphemeralPolicy
-from .session import SessionPolicy
 from .persistent import PersistentPolicy
+from .session import SessionPolicy
 
 __all__ = [
     "EphemeralPolicy",

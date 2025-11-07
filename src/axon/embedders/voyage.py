@@ -6,8 +6,6 @@ specific domains and use cases.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import voyageai
 
 from .base import Embedder
@@ -57,7 +55,7 @@ class VoyageAIEmbedder(Embedder):
         """
         if not api_key:
             raise ValueError("Voyage AI API key cannot be empty")
-        
+
         if model not in self.MODEL_DIMENSIONS:
             raise ValueError(
                 f"Unsupported model: {model}. "
@@ -148,7 +146,7 @@ class VoyageAIEmbedder(Embedder):
             raise ValueError("All texts are empty")
 
         # Check cache for each text
-        embeddings: list[Optional[list[float]]] = []
+        embeddings: list[list[float] | None] = []
         texts_to_embed: list[tuple[int, str]] = []  # (index, text)
 
         for i, text in enumerate(valid_texts):
@@ -157,7 +155,7 @@ class VoyageAIEmbedder(Embedder):
                 if cached is not None:
                     embeddings.append(cached)
                     continue
-            
+
             # Need to embed this text
             embeddings.append(None)
             texts_to_embed.append((i, text))
@@ -166,16 +164,14 @@ class VoyageAIEmbedder(Embedder):
         if texts_to_embed:
             try:
                 batch_texts = [text for _, text in texts_to_embed]
-                
+
                 result = self._client.embed(
                     texts=batch_texts,
                     model=self._model,
                 )
 
                 # Store results in correct positions
-                for (original_idx, text), embedding in zip(
-                    texts_to_embed, result.embeddings
-                ):
+                for (original_idx, text), embedding in zip(texts_to_embed, result.embeddings, strict=False):
                     embeddings[original_idx] = embedding
 
                     # Cache result

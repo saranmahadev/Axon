@@ -6,8 +6,6 @@ text-embedding-3-large, and ada-002.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from openai import AsyncOpenAI, OpenAI
 
 from .base import Embedder
@@ -62,7 +60,7 @@ class OpenAIEmbedder(Embedder):
         """
         if not api_key:
             raise ValueError("OpenAI API key cannot be empty")
-        
+
         if model not in self.MODEL_DIMENSIONS:
             raise ValueError(
                 f"Unsupported model: {model}. "
@@ -163,7 +161,7 @@ class OpenAIEmbedder(Embedder):
             raise ValueError("All texts are empty")
 
         # Check cache for each text
-        embeddings: list[Optional[list[float]]] = []
+        embeddings: list[list[float] | None] = []
         texts_to_embed: list[tuple[int, str]] = []  # (index, text)
 
         for i, text in enumerate(valid_texts):
@@ -172,7 +170,7 @@ class OpenAIEmbedder(Embedder):
                 if cached is not None:
                     embeddings.append(cached)
                     continue
-            
+
             # Need to embed this text
             embeddings.append(None)
             texts_to_embed.append((i, text))
@@ -181,16 +179,14 @@ class OpenAIEmbedder(Embedder):
         if texts_to_embed:
             try:
                 batch_texts = [text for _, text in texts_to_embed]
-                
+
                 response = await self._async_client.embeddings.create(
                     model=self._model,
                     input=batch_texts,
                 )
 
                 # Store results in correct positions
-                for (original_idx, text), embedding_data in zip(
-                    texts_to_embed, response.data
-                ):
+                for (original_idx, text), embedding_data in zip(texts_to_embed, response.data, strict=False):
                     embedding = embedding_data.embedding
                     embeddings[original_idx] = embedding
 

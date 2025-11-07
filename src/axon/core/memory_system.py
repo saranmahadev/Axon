@@ -9,21 +9,19 @@ The MemorySystem coordinates Router, PolicyEngine, ScoringEngine, and
 AdapterRegistry to provide seamless memory operations.
 """
 
-from typing import Dict, List, Optional, Any
-from datetime import datetime
-import uuid
-import asyncio
 import logging
+import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
+from typing import Any
 
-from axon.core.router import Router
-from axon.core.policy_engine import PolicyEngine
-from axon.core.scoring import ScoringEngine
 from axon.core.adapter_registry import AdapterRegistry
 from axon.core.config import MemoryConfig
+from axon.core.policy_engine import PolicyEngine
+from axon.core.router import Router
+from axon.core.scoring import ScoringEngine
 from axon.models.entry import MemoryEntry, MemoryMetadata
 from axon.models.filter import Filter
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,10 +30,10 @@ logger = logging.getLogger(__name__)
 class TraceEvent:
     """
     Trace event for operation tracking and debugging.
-    
+
     Captures key information about memory operations for observability,
     debugging, and performance monitoring.
-    
+
     Attributes:
         timestamp: When the operation occurred
         operation: Type of operation ("store", "recall", "forget", etc.)
@@ -47,48 +45,49 @@ class TraceEvent:
         success: Whether the operation succeeded
         error: Error message if operation failed
     """
+
     timestamp: datetime
     operation: str
     duration_ms: float
-    entry_id: Optional[str] = None
-    query: Optional[str] = None
-    tier: Optional[str] = None
-    result_count: Optional[int] = None
+    entry_id: str | None = None
+    query: str | None = None
+    tier: str | None = None
+    result_count: int | None = None
     success: bool = True
-    error: Optional[str] = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    error: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class MemorySystem:
     """
     Central interface for memory storage and retrieval.
-    
+
     MemorySystem provides a high-level API for managing memories across
     multiple storage tiers. It automatically handles tier selection,
     promotion/demotion, and provides observability through tracing.
-    
+
     Key features:
     - Automatic tier selection based on importance
     - Multi-tier search with intelligent result merging
     - Access pattern tracking and automatic promotion/demotion
     - Input validation and error handling
     - Operation tracing for debugging and monitoring
-    
+
     Example:
         ```python
         config = MemoryConfig(...)
         system = MemorySystem(config)
-        
+
         # Store a memory
         entry_id = await system.store(
             "User prefers dark mode",
             importance=0.8
         )
-        
+
         # Recall memories
         results = await system.recall("user preferences", k=5)
         ```
-    
+
     Attributes:
         config: Memory system configuration
         router: Router for tier management
@@ -96,23 +95,23 @@ class MemorySystem:
         policy_engine: Policy engine for promotion/demotion decisions
         scoring_engine: Scoring engine for importance calculation
     """
-    
+
     def __init__(
         self,
         config: MemoryConfig,
-        router: Optional[Router] = None,
-        registry: Optional[AdapterRegistry] = None,
-        policy_engine: Optional[PolicyEngine] = None,
-        scoring_engine: Optional[ScoringEngine] = None,
-        embedder: Optional[Any] = None
+        router: Router | None = None,
+        registry: AdapterRegistry | None = None,
+        policy_engine: PolicyEngine | None = None,
+        scoring_engine: ScoringEngine | None = None,
+        embedder: Any | None = None,
     ):
         """
         Initialize MemorySystem with configuration and optional components.
-        
+
         If components are not provided, they will be created with default
         configurations. This allows for both simple initialization and
         advanced customization.
-        
+
         Args:
             config: Memory system configuration with tier definitions
             router: Optional pre-configured Router instance
@@ -120,28 +119,28 @@ class MemorySystem:
             policy_engine: Optional pre-configured PolicyEngine instance
             scoring_engine: Optional pre-configured ScoringEngine instance
             embedder: Optional Embedder instance for generating embeddings (required for vector adapters)
-            
+
         Raises:
             ValueError: If config is invalid or missing required tiers
         """
         if not config:
             raise ValueError("config is required")
-        
+
         # At least persistent tier must be configured
         if not config.persistent:
             raise ValueError("config must define at least a persistent tier")
-        
+
         self.config = config
         self.embedder = embedder
-        
+
         # Initialize or use provided components
         self.registry = registry or AdapterRegistry()
         self.scoring_engine = scoring_engine or ScoringEngine()
-        
+
         # Register adapters from config if registry was created new
         if registry is None:
             self._register_adapters_from_config()
-        
+
         # Build tiers dict from config
         tiers_dict = {}
         if config.ephemeral:
@@ -149,31 +148,30 @@ class MemorySystem:
         if config.session:
             tiers_dict["session"] = config.session
         tiers_dict["persistent"] = config.persistent
-        
+
         # Initialize policy engine with tier policies
         if policy_engine is None:
             self.policy_engine = PolicyEngine(
-                registry=self.registry,
-                scoring_engine=self.scoring_engine,
-                tier_policies=tiers_dict
+                registry=self.registry, scoring_engine=self.scoring_engine, tier_policies=tiers_dict
             )
         else:
             self.policy_engine = policy_engine
-        
+
         # Initialize router
         if router is None:
             self.router = Router(
                 config=config,
                 registry=self.registry,
-                policy_engine=self.policy_engine
+                policy_engine=self.policy_engine,
+                embedder=self.embedder,
             )
         else:
             self.router = router
-        
+
         # Tracing
-        self._trace_events: List[TraceEvent] = []
+        self._trace_events: list[TraceEvent] = []
         self._enable_tracing = True
-    
+
     def _register_adapters_from_config(self):
         """Register adapters from configuration."""
         # Build tiers dict from config
@@ -183,50 +181,48 @@ class MemorySystem:
         if self.config.session:
             tiers["session"] = self.config.session
         tiers["persistent"] = self.config.persistent
-        
+
         for tier_name, policy in tiers.items():
             # Register adapter with config
             # The registry will handle lazy initialization
             self.registry.register(
-                tier=tier_name,
-                adapter_type=policy.adapter_type,
-                adapter_config=policy
+                tier=tier_name, adapter_type=policy.adapter_type, adapter_config=policy
             )
-    
+
     async def store(
         self,
         content: str,
-        metadata: Optional[Dict[str, Any]] = None,
-        importance: Optional[float] = None,
-        tags: Optional[List[str]] = None,
-        tier: Optional[str] = None
+        metadata: dict[str, Any] | None = None,
+        importance: float | None = None,
+        tags: list[str] | None = None,
+        tier: str | None = None,
     ) -> str:
         """
         Store a memory with automatic tier selection.
-        
+
         Creates a new memory entry and stores it in the appropriate tier
         based on importance or explicit tier specification. The entry is
         automatically assigned a unique ID and timestamped.
-        
+
         Args:
             content: Text content to store (required, non-empty)
             metadata: Additional key-value metadata (optional)
             importance: Importance score 0.0-1.0 (optional, default: 0.5)
             tags: List of tags for categorization (optional)
             tier: Explicit tier override (optional, bypasses auto-selection)
-            
+
         Returns:
             str: Unique entry ID (UUID format)
-            
+
         Raises:
             ValueError: If content is empty, importance out of range, or tier invalid
             RuntimeError: If storage operation fails
-            
+
         Example:
             ```python
             # Store with automatic tier selection
             id1 = await system.store("User likes pizza", importance=0.8)
-            
+
             # Store with metadata and tags
             id2 = await system.store(
                 "API key: abc123",
@@ -234,7 +230,7 @@ class MemorySystem:
                 metadata={"service": "openai"},
                 tags=["credentials", "api"]
             )
-            
+
             # Store with explicit tier
             id3 = await system.store(
                 "Temporary cache data",
@@ -244,123 +240,123 @@ class MemorySystem:
         """
         start_time = datetime.now()
         entry_id = None
-        
+
         try:
             # Validate inputs
             if not content or not content.strip():
                 raise ValueError("content cannot be empty")
-            
+
             if importance is not None:
                 if not 0.0 <= importance <= 1.0:
                     raise ValueError(f"importance must be between 0.0 and 1.0, got {importance}")
             else:
                 importance = 0.5  # Default importance
-            
+
             if tier is not None:
                 if tier not in self.config.tiers:
                     valid_tiers = list(self.config.tiers.keys())
                     raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {valid_tiers}")
-            
+
             # Generate unique ID
             entry_id = str(uuid.uuid4())
-            
+
             # Build metadata
             entry_metadata = MemoryMetadata(
                 importance=importance,
                 tags=tags or [],
                 created_at=datetime.now(),
                 last_accessed=datetime.now(),
-                access_count=0
+                access_count=0,
             )
-            
+
             # Merge user metadata if provided
             if metadata:
                 # Store custom metadata in a nested dict to avoid conflicts
                 entry_metadata.custom = metadata
-            
+
             # Create memory entry
-            entry = MemoryEntry(
-                id=entry_id,
-                text=content,
-                metadata=entry_metadata
-            )
-            
+            entry = MemoryEntry(id=entry_id, text=content, metadata=entry_metadata)
+
             # Generate embedding if embedder is available
             if self.embedder:
                 embedding = await self.embedder.embed(content)
                 entry.embedding = embedding
-            
+
             # Store via router (handles tier selection if tier not specified)
             await self.router.route_store(entry, tier=tier)
-            
+
             # Log trace event
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-            self._log_trace(TraceEvent(
-                timestamp=start_time,
-                operation="store",
-                duration_ms=duration_ms,
-                entry_id=entry_id,
-                tier=tier,
-                success=True,
-                metadata={"importance": importance, "tags": tags or []}
-            ))
-            
+            self._log_trace(
+                TraceEvent(
+                    timestamp=start_time,
+                    operation="store",
+                    duration_ms=duration_ms,
+                    entry_id=entry_id,
+                    tier=tier,
+                    success=True,
+                    metadata={"importance": importance, "tags": tags or []},
+                )
+            )
+
             return entry_id
-            
+
         except Exception as e:
             # Log failed operation
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-            self._log_trace(TraceEvent(
-                timestamp=start_time,
-                operation="store",
-                duration_ms=duration_ms,
-                entry_id=entry_id,
-                tier=tier,
-                success=False,
-                error=str(e)
-            ))
+            self._log_trace(
+                TraceEvent(
+                    timestamp=start_time,
+                    operation="store",
+                    duration_ms=duration_ms,
+                    entry_id=entry_id,
+                    tier=tier,
+                    success=False,
+                    error=str(e),
+                )
+            )
             raise
-    
+
     async def recall(
         self,
         query: str,
         k: int = 5,
-        filter: Optional[Filter] = None,
-        tiers: Optional[List[str]] = None,
-        min_importance: Optional[float] = None
-    ) -> List[MemoryEntry]:
+        filter: Filter | None = None,
+        tiers: list[str] | None = None,
+        min_importance: float | None = None,
+    ) -> list[MemoryEntry]:
         """
         Search and retrieve memories across tiers.
-        
+
         Searches for memories matching the query across specified tiers
         (or all tiers by default). Results are automatically deduplicated,
         sorted by relevance, and limited to k entries.
-        
+
         Args:
             query: Search query text (required, non-empty)
             k: Maximum number of results to return (default: 5, must be > 0)
             filter: Optional filter for metadata/tags (optional)
             tiers: Specific tiers to search (optional, default: all tiers)
             min_importance: Minimum importance threshold (optional, 0.0-1.0)
-            
+
         Returns:
             List[MemoryEntry]: Matching memory entries, sorted by relevance
-            
+
         Raises:
             ValueError: If query is empty, k <= 0, or tiers invalid
-            
+
         Example:
             ```python
             # Basic search
             results = await system.recall("user preferences")
-            
+
             # Search with limit and importance filter
             results = await system.recall(
                 "important settings",
                 k=10,
                 min_importance=0.7
             )
-            
+
             # Search specific tiers with filter
             results = await system.recall(
                 "api credentials",
@@ -370,130 +366,125 @@ class MemorySystem:
             ```
         """
         start_time = datetime.now()
-        
+
         try:
             # Validate inputs
-            if not query or not query.strip():
-                raise ValueError("query cannot be empty")
-            
+            if query is None:
+                raise ValueError("query cannot be None")
+
+            # Allow empty query for "get all" semantics
+            query = query.strip()
+
             if k <= 0:
                 raise ValueError(f"k must be greater than 0, got {k}")
-            
+
             if tiers is not None:
                 # Validate all specified tiers exist
                 invalid_tiers = [t for t in tiers if t not in self.config.tiers]
                 if invalid_tiers:
                     valid_tiers = list(self.config.tiers.keys())
-                    raise ValueError(
-                        f"Invalid tiers: {invalid_tiers}. Valid tiers: {valid_tiers}"
-                    )
-            
+                    raise ValueError(f"Invalid tiers: {invalid_tiers}. Valid tiers: {valid_tiers}")
+
             if min_importance is not None:
                 if not 0.0 <= min_importance <= 1.0:
                     raise ValueError(
                         f"min_importance must be between 0.0 and 1.0, got {min_importance}"
                     )
-            
+
             # Search via router
             results = await self.router.route_recall(
-                query_text=query,
-                k=k,
-                filter=filter,
-                tiers=tiers
+                query_text=query, k=k, filter=filter, tiers=tiers
             )
-            
+
             # Apply importance filter if specified
             if min_importance is not None:
                 results = [
-                    entry for entry in results
-                    if entry.metadata.importance >= min_importance
+                    entry for entry in results if entry.metadata.importance >= min_importance
                 ]
-            
+
             # Log trace event
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-            self._log_trace(TraceEvent(
-                timestamp=start_time,
-                operation="recall",
-                duration_ms=duration_ms,
-                query=query,
-                tier=tiers[0] if tiers and len(tiers) == 1 else None,
-                result_count=len(results),
-                success=True,
-                metadata={
-                    "k": k,
-                    "min_importance": min_importance,
-                    "tiers": tiers or "all"
-                }
-            ))
-            
+            self._log_trace(
+                TraceEvent(
+                    timestamp=start_time,
+                    operation="recall",
+                    duration_ms=duration_ms,
+                    query=query,
+                    tier=tiers[0] if tiers and len(tiers) == 1 else None,
+                    result_count=len(results),
+                    success=True,
+                    metadata={"k": k, "min_importance": min_importance, "tiers": tiers or "all"},
+                )
+            )
+
             return results
-            
+
         except Exception as e:
             # Log failed operation
             duration_ms = (datetime.now() - start_time).total_seconds() * 1000
-            self._log_trace(TraceEvent(
-                timestamp=start_time,
-                operation="recall",
-                duration_ms=duration_ms,
-                query=query,
-                success=False,
-                error=str(e)
-            ))
+            self._log_trace(
+                TraceEvent(
+                    timestamp=start_time,
+                    operation="recall",
+                    duration_ms=duration_ms,
+                    query=query,
+                    success=False,
+                    error=str(e),
+                )
+            )
             raise
-    
+
     def _log_trace(self, event: TraceEvent):
         """
         Log a trace event.
-        
+
         Args:
             event: Trace event to log
         """
         if self._enable_tracing:
             self._trace_events.append(event)
-    
+
     def get_trace_events(
-        self,
-        operation: Optional[str] = None,
-        limit: Optional[int] = None
-    ) -> List[TraceEvent]:
+        self, operation: str | None = None, limit: int | None = None
+    ) -> list[TraceEvent]:
         """
         Get trace events for debugging and monitoring.
-        
+
         Args:
             operation: Filter by operation type (optional)
             limit: Maximum number of events to return (optional)
-            
+
         Returns:
             List of trace events, most recent first
         """
         events = self._trace_events.copy()
         events.reverse()  # Most recent first
-        
+
         if operation:
             events = [e for e in events if e.operation == operation]
-        
+
         if limit:
             events = events[:limit]
-        
+
         return events
-    
+
     def clear_trace_events(self):
         """Clear all trace events."""
         self._trace_events.clear()
-    
+
     def enable_tracing(self, enabled: bool = True):
         """
         Enable or disable operation tracing.
-        
+
         Args:
             enabled: Whether to enable tracing
         """
         self._enable_tracing = enabled
-    
-    def get_statistics(self) -> Dict[str, Any]:
+
+    def get_statistics(self) -> dict[str, Any]:
         """
         Get memory system statistics.
-        
+
         Returns:
             Dictionary with statistics including:
             - tier_stats: Per-tier operation counts
@@ -501,38 +492,38 @@ class MemorySystem:
             - trace_events: Number of trace events
         """
         tier_stats = self.router.get_tier_stats()
-        
+
         total_stores = sum(stats.get("stores", 0) for stats in tier_stats.values())
         total_recalls = sum(stats.get("recalls", 0) for stats in tier_stats.values())
         total_forgets = sum(stats.get("forgets", 0) for stats in tier_stats.values())
-        
+
         return {
             "tier_stats": tier_stats,
             "total_operations": {
                 "stores": total_stores,
                 "recalls": total_recalls,
-                "forgets": total_forgets
+                "forgets": total_forgets,
             },
-            "trace_events": len(self._trace_events)
+            "trace_events": len(self._trace_events),
         }
-    
+
     async def export(
         self,
-        tier: Optional[str] = None,
-        filter: Optional[Filter] = None,
-        include_embeddings: bool = True
-    ) -> Dict[str, Any]:
+        tier: str | None = None,
+        filter: Filter | None = None,
+        include_embeddings: bool = True,
+    ) -> dict[str, Any]:
         """
         Export memories to a portable JSON-serializable format.
-        
+
         Exports all memories or a filtered subset to a dictionary that can be
         serialized to JSON for backup, migration, or archival purposes.
-        
+
         Args:
             tier: Export only from specific tier (None = all tiers)
             filter: Filter to apply when selecting memories to export
             include_embeddings: Whether to include embedding vectors (can be large)
-            
+
         Returns:
             Dictionary containing:
             - version: Export format version
@@ -540,53 +531,53 @@ class MemorySystem:
             - config: Tier configuration summary
             - entries: List of memory entries
             - statistics: Export statistics
-            
+
         Example:
             ```python
             # Export all memories
             data = await system.export()
-            
+
             # Export specific tier
             data = await system.export(tier="persistent")
-            
+
             # Export filtered memories
             data = await system.export(
                 filter=Filter(tags=["important"], min_importance=0.8)
             )
-            
+
             # Save to file
             import json
             with open("backup.json", "w") as f:
                 json.dump(data, f, indent=2)
             ```
-            
+
         Raises:
             ValueError: If tier is invalid
         """
         start_time = datetime.now()
-        
+
         # Validate tier if specified
         if tier and tier not in self.config.tiers:
             valid_tiers = list(self.config.tiers.keys())
             raise ValueError(f"Invalid tier '{tier}'. Valid tiers: {valid_tiers}")
-        
+
         # Determine tiers to export from
         tiers_to_export = [tier] if tier else list(self.config.tiers.keys())
-        
+
         # Collect all entries
         all_entries = []
         stats_by_tier = {}
-        
+
         for tier_name in tiers_to_export:
             adapter = self.registry.get_adapter(tier_name)
-            
+
             # Query all entries from this tier
             # Use a broad query to get everything
             try:
                 entries = await adapter.query(
                     vector=[0.0] * 384,  # Dummy vector - InMemory falls back to text search
                     k=100000,  # Very large number to get all
-                    filter=filter
+                    filter=filter,
                 )
             except Exception:
                 # If query fails, try to list all IDs and fetch
@@ -600,9 +591,9 @@ class MemorySystem:
                             entries.append(entry)
                     except KeyError:
                         continue
-            
+
             stats_by_tier[tier_name] = len(entries)
-            
+
             # Add tier information to each entry
             for entry in entries:
                 entry_dict = {
@@ -615,18 +606,22 @@ class MemorySystem:
                         "source": entry.metadata.source,
                         "privacy_level": entry.metadata.privacy_level,
                         "created_at": entry.metadata.created_at.isoformat(),
-                        "last_accessed_at": entry.metadata.last_accessed_at.isoformat() if entry.metadata.last_accessed_at else None,
+                        "last_accessed_at": (
+                            entry.metadata.last_accessed_at.isoformat()
+                            if entry.metadata.last_accessed_at
+                            else None
+                        ),
                         "tags": entry.metadata.tags,
                         "importance": entry.metadata.importance,
                         "version": entry.metadata.version,
                     },
-                    "tier": tier_name
+                    "tier": tier_name,
                 }
-                
+
                 # Optionally include embedding
                 if include_embeddings and entry.embedding:
                     entry_dict["embedding"] = entry.embedding
-                
+
                 # Include provenance if present
                 if entry.metadata.provenance:
                     entry_dict["provenance"] = [
@@ -634,55 +629,57 @@ class MemorySystem:
                             "action": p.action,
                             "by": p.by,
                             "timestamp": p.timestamp.isoformat(),
-                            "metadata": p.metadata
+                            "metadata": p.metadata,
                         }
                         for p in entry.metadata.provenance
                     ]
-                
+
                 all_entries.append(entry_dict)
-        
+
         # Build export data structure
         export_data = {
             "version": "1.0",
             "exported_at": datetime.now().isoformat(),
             "config": {
                 "tiers": list(self.config.tiers.keys()),
-                "default_tier": self.config.default_tier
+                "default_tier": self.config.default_tier,
             },
             "entries": all_entries,
             "statistics": {
                 "total_entries": len(all_entries),
                 "by_tier": stats_by_tier,
-                "include_embeddings": include_embeddings
-            }
+                "include_embeddings": include_embeddings,
+            },
         }
-        
+
         # Trace the operation
         duration_ms = (datetime.now() - start_time).total_seconds() * 1000
         if self._enable_tracing:
-            self._trace_events.append(TraceEvent(
-                timestamp=datetime.now(),
-                operation="EXPORT",
-                duration_ms=duration_ms,
-                tier=tier,
-                result_count=len(all_entries),
-                metadata={"filter": str(filter) if filter else None}
-            ))
-        
+            self._trace_events.append(
+                TraceEvent(
+                    timestamp=datetime.now(),
+                    operation="EXPORT",
+                    duration_ms=duration_ms,
+                    tier=tier,
+                    result_count=len(all_entries),
+                    metadata={"filter": str(filter) if filter else None},
+                )
+            )
+
         return export_data
-    
+
     async def import_from(
         self,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         overwrite: bool = False,
-        tier_mapping: Optional[Dict[str, str]] = None
-    ) -> Dict[str, int]:
+        tier_mapping: dict[str, str] | None = None,
+    ) -> dict[str, int]:
         """
         Import memories from exported data.
-        
+
         Imports memory entries from a previously exported backup. Handles
         tier mapping, conflict resolution, and validation.
-        
+
         Args:
             data: Export data dictionary (from export() method)
             overwrite: If True, overwrite existing entries with same ID.
@@ -690,168 +687,171 @@ class MemorySystem:
             tier_mapping: Optional mapping of {old_tier: new_tier} to change
                          tier assignments during import. Example:
                          {"ephemeral": "session"} moves ephemeral to session.
-            
+
         Returns:
             Dictionary with statistics:
             - imported: Number of entries successfully imported
             - skipped: Number of entries skipped (already exist, overwrite=False)
             - errors: Number of entries that failed to import
             - by_tier: Breakdown by target tier
-            
+
         Example:
             ```python
             # Import from backup
             import json
             with open("backup.json") as f:
                 data = json.load(f)
-            
+
             stats = await system.import_from(data)
             print(f"Imported {stats['imported']} entries")
-            
+
             # Import with tier remapping
             stats = await system.import_from(
                 data,
                 tier_mapping={"ephemeral": "session"}  # Move ephemeral→session
             )
-            
+
             # Import with overwrite
             stats = await system.import_from(data, overwrite=True)
             ```
-            
+
         Raises:
             ValueError: If data format is invalid or tiers don't exist
         """
         start_time = datetime.now()
-        
+
         # Validate export data
         self._validate_export_data(data)
-        
+
         # Track statistics
         imported = 0
         skipped = 0
         errors = 0
         by_tier = {}
-        
+
         # Process each entry
         for entry_data in data.get("entries", []):
             try:
                 # Determine target tier
                 original_tier = entry_data.get("tier", self.config.default_tier)
                 target_tier = original_tier
-                
+
                 # Apply tier mapping if provided
                 if tier_mapping and original_tier in tier_mapping:
                     target_tier = tier_mapping[original_tier]
-                
+
                 # Validate target tier exists
                 if target_tier not in self.config.tiers:
                     errors += 1
                     continue
-                
+
                 # Check if entry already exists
                 adapter = self.registry.get_adapter(target_tier)
                 entry_id = entry_data["id"]
-                
+
                 exists = False
                 try:
                     await adapter.get(entry_id)
                     exists = True
                 except KeyError:
                     exists = False
-                
+
                 if exists and not overwrite:
                     skipped += 1
                     continue
-                
+
                 # Reconstruct MemoryEntry
                 from axon.models.base import ProvenanceEvent
-                
+
                 metadata_dict = entry_data["metadata"]
                 provenance_list = []
-                
+
                 if "provenance" in entry_data:
                     for p in entry_data["provenance"]:
-                        provenance_list.append(ProvenanceEvent(
-                            action=p["action"],
-                            by=p["by"],
-                            timestamp=datetime.fromisoformat(p["timestamp"]),
-                            metadata=p.get("metadata", {})
-                        ))
-                
+                        provenance_list.append(
+                            ProvenanceEvent(
+                                action=p["action"],
+                                by=p["by"],
+                                timestamp=datetime.fromisoformat(p["timestamp"]),
+                                metadata=p.get("metadata", {}),
+                            )
+                        )
+
                 metadata = MemoryMetadata(
                     user_id=metadata_dict.get("user_id"),
                     session_id=metadata_dict.get("session_id"),
                     source=metadata_dict.get("source", "app"),
                     privacy_level=metadata_dict.get("privacy_level", "public"),
                     created_at=datetime.fromisoformat(metadata_dict["created_at"]),
-                    last_accessed_at=datetime.fromisoformat(metadata_dict["last_accessed_at"]) if metadata_dict.get("last_accessed_at") else None,
+                    last_accessed_at=(
+                        datetime.fromisoformat(metadata_dict["last_accessed_at"])
+                        if metadata_dict.get("last_accessed_at")
+                        else None
+                    ),
                     tags=metadata_dict.get("tags", []),
                     importance=metadata_dict.get("importance", 0.5),
                     version=metadata_dict.get("version", ""),
-                    provenance=provenance_list
+                    provenance=provenance_list,
                 )
-                
+
                 entry = MemoryEntry(
                     id=entry_id,
                     type=entry_data.get("type", "note"),
                     text=entry_data["text"],
                     embedding=entry_data.get("embedding"),
-                    metadata=metadata
+                    metadata=metadata,
                 )
-                
+
                 # Store in target tier
                 await adapter.save(entry)
                 imported += 1
-                
+
                 # Update tier stats
                 by_tier[target_tier] = by_tier.get(target_tier, 0) + 1
-                
-            except Exception as e:
+
+            except Exception:
                 errors += 1
                 continue
-        
+
         # Build result statistics
-        result = {
-            "imported": imported,
-            "skipped": skipped,
-            "errors": errors,
-            "by_tier": by_tier
-        }
-        
+        result = {"imported": imported, "skipped": skipped, "errors": errors, "by_tier": by_tier}
+
         # Trace the operation
         duration_ms = (datetime.now() - start_time).total_seconds() * 1000
         if self._enable_tracing:
-            self._trace_events.append(TraceEvent(
-                timestamp=datetime.now(),
-                operation="IMPORT",
-                duration_ms=duration_ms,
-                result_count=imported,
-                metadata={
-                    "total_entries": len(data.get("entries", [])),
-                    "overwrite": overwrite,
-                    "tier_mapping": tier_mapping
-                }
-            ))
-        
+            self._trace_events.append(
+                TraceEvent(
+                    timestamp=datetime.now(),
+                    operation="IMPORT",
+                    duration_ms=duration_ms,
+                    result_count=imported,
+                    metadata={
+                        "total_entries": len(data.get("entries", [])),
+                        "overwrite": overwrite,
+                        "tier_mapping": tier_mapping,
+                    },
+                )
+            )
+
         return result
-    
+
     async def sync(
         self,
         source_tier: str,
         target_tier: str,
-        filter: Optional[Filter] = None,
+        filter: Filter | None = None,
         delete_source: bool = False,
-        conflict_resolution: str = "newer"
-    ) -> Dict[str, int]:
+        conflict_resolution: str = "newer",
+    ) -> dict[str, int]:
         """
         Synchronize memories between tiers.
-        
+
         Copies or moves memories from one tier to another. Useful for:
         - Promoting important session data to persistent storage
         - Archiving old data to cold storage
         - Replicating data across adapters
         - Tier rebalancing
-        
+
         Args:
             source_tier: Tier to copy/move from
             target_tier: Tier to copy/move to
@@ -862,14 +862,14 @@ class MemorySystem:
                 - "source": Always use source entry
                 - "target": Keep target entry (skip)
                 - "merge": Merge metadata (not yet implemented)
-            
+
         Returns:
             Dictionary with statistics:
             - synced: Number of entries successfully synced
             - skipped: Number of entries skipped (conflicts, errors)
             - deleted: Number of entries deleted from source
             - conflicts: Number of conflicts encountered
-            
+
         Example:
             ```python
             # Promote important session memories to persistent
@@ -878,7 +878,7 @@ class MemorySystem:
                 target_tier="persistent",
                 filter=Filter(min_importance=0.8)
             )
-            
+
             # Archive old persistent data (move operation)
             stats = await system.sync(
                 source_tier="persistent",
@@ -887,47 +887,45 @@ class MemorySystem:
                 delete_source=True  # Delete from persistent after archiving
             )
             ```
-            
+
         Raises:
             ValueError: If tiers are invalid or conflict_resolution is unknown
         """
         start_time = datetime.now()
-        
+
         # Validate tiers
         if source_tier not in self.config.tiers:
             valid_tiers = list(self.config.tiers.keys())
             raise ValueError(f"Invalid source tier '{source_tier}'. Valid tiers: {valid_tiers}")
-        
+
         if target_tier not in self.config.tiers:
             valid_tiers = list(self.config.tiers.keys())
             raise ValueError(f"Invalid target tier '{target_tier}'. Valid tiers: {valid_tiers}")
-        
+
         if source_tier == target_tier:
             raise ValueError("Source and target tiers must be different")
-        
+
         # Validate conflict resolution
         valid_resolutions = ["newer", "source", "target"]
         if conflict_resolution not in valid_resolutions:
-            raise ValueError(f"Invalid conflict_resolution '{conflict_resolution}'. Valid: {valid_resolutions}")
-        
+            raise ValueError(
+                f"Invalid conflict_resolution '{conflict_resolution}'. Valid: {valid_resolutions}"
+            )
+
         # Get adapters
         source_adapter = self.registry.get_adapter(source_tier)
         target_adapter = self.registry.get_adapter(target_tier)
-        
+
         # Track statistics
         synced = 0
         skipped = 0
         deleted = 0
         conflicts = 0
-        
+
         # Get entries from source
         try:
             # Try query first
-            entries = await source_adapter.query(
-                vector=[0.0] * 384,
-                k=100000,
-                filter=filter
-            )
+            entries = await source_adapter.query(vector=[0.0] * 384, k=100000, filter=filter)
         except Exception:
             # Fall back to listing IDs
             entry_ids = await source_adapter.list_ids()
@@ -939,7 +937,7 @@ class MemorySystem:
                         entries.append(entry)
                 except KeyError:
                     continue
-        
+
         # Process each entry
         to_delete = []
         for entry in entries:
@@ -950,37 +948,40 @@ class MemorySystem:
                     target_entry = await target_adapter.get(entry.id)
                 except KeyError:
                     pass
-                
+
                 should_sync = True
-                
+
                 if target_entry:
                     conflicts += 1
-                    
+
                     # Apply conflict resolution
                     if conflict_resolution == "target":
                         should_sync = False
                     elif conflict_resolution == "newer":
                         # Compare last_accessed_at or created_at
                         source_time = entry.metadata.last_accessed_at or entry.metadata.created_at
-                        target_time = target_entry.metadata.last_accessed_at or target_entry.metadata.created_at
+                        target_time = (
+                            target_entry.metadata.last_accessed_at
+                            or target_entry.metadata.created_at
+                        )
                         should_sync = source_time > target_time
                     # "source" always syncs
-                
+
                 if should_sync:
                     # Copy to target
                     await target_adapter.save(entry)
                     synced += 1
-                    
+
                     # Mark for deletion if move operation
                     if delete_source:
                         to_delete.append(entry.id)
                 else:
                     skipped += 1
-                    
+
             except Exception:
                 skipped += 1
                 continue
-        
+
         # Delete from source if move operation
         if delete_source:
             for entry_id in to_delete:
@@ -989,82 +990,79 @@ class MemorySystem:
                     deleted += 1
                 except Exception:
                     pass
-        
+
         # Build result
-        result = {
-            "synced": synced,
-            "skipped": skipped,
-            "deleted": deleted,
-            "conflicts": conflicts
-        }
-        
+        result = {"synced": synced, "skipped": skipped, "deleted": deleted, "conflicts": conflicts}
+
         # Trace the operation
         duration_ms = (datetime.now() - start_time).total_seconds() * 1000
         if self._enable_tracing:
-            self._trace_events.append(TraceEvent(
-                timestamp=datetime.now(),
-                operation="SYNC",
-                duration_ms=duration_ms,
-                result_count=synced,
-                metadata={
-                    "source_tier": source_tier,
-                    "target_tier": target_tier,
-                    "delete_source": delete_source,
-                    "conflict_resolution": conflict_resolution,
-                    "filter": str(filter) if filter else None
-                }
-            ))
-        
+            self._trace_events.append(
+                TraceEvent(
+                    timestamp=datetime.now(),
+                    operation="SYNC",
+                    duration_ms=duration_ms,
+                    result_count=synced,
+                    metadata={
+                        "source_tier": source_tier,
+                        "target_tier": target_tier,
+                        "delete_source": delete_source,
+                        "conflict_resolution": conflict_resolution,
+                        "filter": str(filter) if filter else None,
+                    },
+                )
+            )
+
         return result
-    
-    def _validate_export_data(self, data: Dict[str, Any]):
+
+    def _validate_export_data(self, data: dict[str, Any]):
         """
         Validate export data format.
-        
+
         Args:
             data: Export data to validate
-            
+
         Raises:
             ValueError: If data format is invalid
         """
         if not isinstance(data, dict):
             raise ValueError("Export data must be a dictionary")
-        
+
         if "version" not in data:
             raise ValueError("Export data missing 'version' field")
-        
+
         if "entries" not in data:
             raise ValueError("Export data missing 'entries' field")
-        
+
         if not isinstance(data["entries"], list):
             raise ValueError("Export data 'entries' must be a list")
-        
+
         # Validate each entry has required fields
         for i, entry in enumerate(data["entries"]):
             if not isinstance(entry, dict):
                 raise ValueError(f"Entry {i} is not a dictionary")
-            
+
             required_fields = ["id", "text", "metadata"]
-            for field in required_fields:
-                if field not in entry:
-                    raise ValueError(f"Entry {i} missing required field '{field}'")
-    
+            for field_name in required_fields:
+                if field_name not in entry:
+                    raise ValueError(f"Entry {i} missing required field '{field_name}'")
+
     async def compact(
         self,
-        tier: Optional[str] = None,
+        tier: str | None = None,
         strategy: str = "count",
-        threshold: Optional[int] = None,
+        threshold: int | None = None,
         dry_run: bool = False,
-        summarizer: Optional[Any] = None,
-        embedder: Optional[Any] = None
-    ) -> Dict[str, Any]:
+        summarizer: Any | None = None,
+        embedder: Any | None = None,
+    ) -> dict[str, Any]:
         """
         Compact memories in a tier by summarizing groups of entries.
-        
+
         Compaction reduces the number of entries in a tier by grouping
         similar or related entries and replacing them with LLM-generated
         summaries. This helps manage storage costs and query performance.
-        
+
         The compaction process:
         1. Check if tier needs compaction (via threshold)
         2. Select entries to compact (low importance, older entries)
@@ -1072,7 +1070,7 @@ class MemorySystem:
         4. Summarize each group using an LLM
         5. Replace original entries with summary entries
         6. Update provenance to track what was summarized
-        
+
         Args:
             tier: Tier to compact (None = check all tiers and compact as needed)
             strategy: Compaction strategy to use:
@@ -1084,7 +1082,7 @@ class MemorySystem:
             dry_run: If True, return what would be compacted without doing it
             summarizer: Summarizer instance to use (None = create default LLMSummarizer)
             embedder: Embedder instance for generating summary embeddings (optional)
-            
+
         Returns:
             Dictionary with compaction results:
             {
@@ -1098,12 +1096,12 @@ class MemorySystem:
                 "execution_time": 45.2,
                 "strategy": "count"
             }
-            
+
         Raises:
             ValueError: If tier is invalid
             ValueError: If strategy is not supported
             RuntimeError: If compaction fails
-            
+
         Example:
             >>> # Compact persistent tier when over 10,000 entries
             >>> result = await memory_system.compact(
@@ -1114,41 +1112,44 @@ class MemorySystem:
             >>> print(f"Reduced from {result['entries_before']} to {result['entries_after']}")
             >>> print(f"Created {result['summaries_created']} summaries")
             >>> print(f"Reduction: {result['reduction_ratio']*100:.1f}%")
-            
+
             >>> # Dry run to see what would happen
             >>> result = await memory_system.compact(tier="session", dry_run=True)
             >>> if result['entries_before'] > result['entries_after']:
             ...     print(f"Would compact {result['groups_compacted']} groups")
-            
+
             >>> # Auto-compact all tiers that need it
             >>> result = await memory_system.compact()  # None = all tiers
         """
-        from .summarizer import LLMSummarizer
         from ..models.base import MemoryEntryType, ProvenanceEvent
-        
+        from .summarizer import LLMSummarizer
+
         start_time = datetime.now()
-        
+
+        # Use self.embedder if no embedder provided
+        if embedder is None:
+            embedder = self.embedder
+
         # Validate strategy
         valid_strategies = ["count", "semantic", "importance", "time"]
         if strategy not in valid_strategies:
             raise ValueError(
-                f"Invalid compaction strategy: '{strategy}'. "
-                f"Must be one of {valid_strategies}"
+                f"Invalid compaction strategy: '{strategy}'. " f"Must be one of {valid_strategies}"
             )
-        
+
         # Only count strategy is implemented for now
         if strategy != "count":
             raise ValueError(
                 f"Strategy '{strategy}' is not yet implemented. "
                 f"Currently only 'count' strategy is supported."
             )
-        
+
         # Validate tier if specified
         if tier is not None and tier not in self.config.tiers:
             raise ValueError(
                 f"Invalid tier: '{tier}'. Available tiers: {list(self.config.tiers.keys())}"
             )
-        
+
         # Determine which tiers to compact
         tiers_to_compact = []
         if tier is not None:
@@ -1163,7 +1164,7 @@ class MemorySystem:
                 )
                 if should_compact:
                     tiers_to_compact.append(tier_name)
-        
+
         # If no tiers need compaction
         if not tiers_to_compact:
             result = {
@@ -1176,9 +1177,9 @@ class MemorySystem:
                 "dry_run": dry_run,
                 "execution_time": 0.0,
                 "strategy": strategy,
-                "reason": "No tiers need compaction (below threshold)"
+                "reason": "No tiers need compaction (below threshold)",
             }
-            
+
             # Create trace event
             if self._enable_tracing:
                 self._trace_events.append(
@@ -1193,100 +1194,100 @@ class MemorySystem:
                             "strategy": strategy,
                             "tiers_checked": list(self.config.tiers.keys()),
                             "tiers_compacted": 0,
-                            "dry_run": dry_run
-                        }
+                            "dry_run": dry_run,
+                        },
                     )
                 )
-            
+
             return result
-        
+
         # Initialize summarizer if not provided
         if summarizer is None:
             summarizer = LLMSummarizer()
-        
+
         # Compact each tier
         total_before = 0
         total_after = 0
         total_summaries = 0
         total_groups = 0
-        
+
         for tier_name in tiers_to_compact:
             # Get adapter and current entries
             adapter = await self.registry.get_adapter(tier_name)
-            
+
             # Get compaction threshold
             tier_threshold = threshold
             if tier_threshold is None:
-                policy = self.policy_engine.tier_policies.get(tier_name)
-                if policy and policy.compaction_threshold:
+                policy = self.policy_engine._policies.get(tier_name)
+                if (
+                    policy
+                    and hasattr(policy, "compaction_threshold")
+                    and policy.compaction_threshold
+                ):
                     tier_threshold = policy.compaction_threshold
                 else:
                     continue  # Skip if no threshold
-            
+
             # Get current count
             current_count = adapter.count()
             total_before += current_count
-            
+
             # Check if compaction is needed
             if current_count < tier_threshold:
                 total_after += current_count
                 continue
-            
+
             # Calculate how many entries to compact (compact bottom 50%)
             target_count = int(tier_threshold * 0.8)  # Compact down to 80% of threshold
             entries_to_compact_count = current_count - target_count
-            
+
             if entries_to_compact_count <= 0:
                 total_after += current_count
                 continue
-            
+
             # Query all entries
             all_entries = await adapter.query(
-                vector=[0.0] * 1536,  # Dummy vector
-                k=current_count,
-                filter=None
+                vector=[0.0] * 1536, k=current_count, filter=None  # Dummy vector
             )
-            
+
             # Sort by importance (low first) and date (old first)
             sorted_entries = sorted(
-                all_entries,
-                key=lambda e: (e.metadata.importance, e.metadata.created_at)
+                all_entries, key=lambda e: (e.metadata.importance, e.metadata.created_at)
             )
-            
+
             # Select entries to compact (bottom entries)
             entries_to_compact = sorted_entries[:entries_to_compact_count]
             entries_to_keep = sorted_entries[entries_to_compact_count:]
-            
+
             # Group entries for summarization (batches of 100)
             batch_size = 100
             groups = []
             for i in range(0, len(entries_to_compact), batch_size):
-                batch = entries_to_compact[i:i + batch_size]
+                batch = entries_to_compact[i : i + batch_size]
                 if batch:  # Only add non-empty batches
                     groups.append(batch)
-            
+
             total_groups += len(groups)
-            
+
             # If dry run, just calculate statistics
             if dry_run:
                 total_after += len(entries_to_keep) + len(groups)
                 total_summaries += len(groups)
                 continue
-            
+
             # Summarize each group
             summary_entries = []
             for group in groups:
                 try:
                     # Create summary text
                     summary_text = await summarizer.summarize(
-                        group,
-                        context=f"{tier_name} tier compaction"
+                        group, context=f"{tier_name} tier compaction"
                     )
-                    
+
                     # Calculate aggregate importance (weighted average)
                     total_importance = sum(e.metadata.importance for e in group)
                     avg_importance = total_importance / len(group)
-                    
+
                     # Create provenance event
                     provenance = ProvenanceEvent(
                         timestamp=datetime.now(),
@@ -1297,10 +1298,10 @@ class MemorySystem:
                             "tier": tier_name,
                             "summarized_count": str(len(group)),
                             "summarized_ids": ",".join([e.id for e in group]),
-                            "original_importance_avg": str(avg_importance)
-                        }
+                            "original_importance_avg": str(avg_importance),
+                        },
                     )
-                    
+
                     # Create summary entry
                     summary_entry = MemoryEntry(
                         id=str(uuid.uuid4()),
@@ -1314,27 +1315,27 @@ class MemorySystem:
                             privacy_level=group[0].metadata.privacy_level,
                             created_at=group[0].metadata.created_at,  # Use oldest date
                             last_accessed_at=datetime.now(),
-                            tags=list(set(tag for e in group for tag in e.metadata.tags)),
+                            tags=list({tag for e in group for tag in e.metadata.tags}),
                             importance=avg_importance,
                             version="1.0",
-                            provenance=[provenance]
-                        )
+                            provenance=[provenance],
+                        ),
                     )
-                    
+
                     # Generate embedding for summary (if embedder provided)
                     if embedder:
                         summary_embedding = await embedder.embed(summary_text)
                         summary_entry.embedding = summary_embedding
-                    
+
                     summary_entries.append(summary_entry)
                     total_summaries += 1
-                    
+
                 except Exception as e:
                     # Log error but continue with other groups
                     logger.error(f"Failed to summarize group in {tier_name}: {e}")
                     # Keep original entries instead
                     entries_to_keep.extend(group)
-            
+
             # Delete old entries and save summaries
             if summary_entries:
                 # Delete entries that were summarized
@@ -1343,24 +1344,24 @@ class MemorySystem:
                         await adapter.delete(entry.id)
                     except Exception as e:
                         logger.warning(f"Failed to delete entry {entry.id}: {e}")
-                
+
                 # Save summary entries
                 for summary_entry in summary_entries:
                     try:
                         await adapter.save(summary_entry)
                     except Exception as e:
                         logger.error(f"Failed to save summary entry: {e}")
-            
+
             # Update count
             new_count = adapter.count()
             total_after += new_count
-        
+
         # Calculate statistics
         execution_time = (datetime.now() - start_time).total_seconds()
         reduction_ratio = 0.0
         if total_before > 0:
             reduction_ratio = (total_before - total_after) / total_before
-        
+
         result = {
             "tier": tier or "multiple",
             "tiers_compacted": tiers_to_compact,
@@ -1371,9 +1372,9 @@ class MemorySystem:
             "reduction_ratio": reduction_ratio,
             "dry_run": dry_run,
             "execution_time": execution_time,
-            "strategy": strategy
+            "strategy": strategy,
         }
-        
+
         # Create trace event
         if self._enable_tracing:
             self._trace_events.append(
@@ -1390,29 +1391,29 @@ class MemorySystem:
                         "threshold": threshold,
                         "dry_run": dry_run,
                         "summaries_created": total_summaries,
-                        "groups_compacted": total_groups
-                    }
+                        "groups_compacted": total_groups,
+                    },
                 )
             )
-        
+
         return result
-    
+
     async def close(self):
         """
         Close all adapters and clean up resources.
-        
+
         Should be called when the MemorySystem is no longer needed.
         """
         await self.registry.close_all()
-    
+
     async def __aenter__(self):
         """Async context manager entry."""
         return self
-    
+
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit."""
         await self.close()
-    
+
     def __repr__(self) -> str:
         """String representation."""
         tier_names = list(self.config.tiers.keys())

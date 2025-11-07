@@ -6,8 +6,6 @@ generation without API costs. Models run on CPU or GPU.
 
 from __future__ import annotations
 
-from typing import Optional
-
 from sentence_transformers import SentenceTransformer
 
 from .base import Embedder
@@ -40,7 +38,7 @@ class SentenceTransformerEmbedder(Embedder):
         self,
         model_name: str = "all-MiniLM-L6-v2",
         cache_enabled: bool = True,
-        device: Optional[str] = None,
+        device: str | None = None,
     ):
         """Initialize Sentence Transformer embedder.
 
@@ -58,7 +56,7 @@ class SentenceTransformerEmbedder(Embedder):
 
         # Load model (downloads on first use)
         self._model = SentenceTransformer(model_name, device=device)
-        
+
         # Get actual dimension from model
         self._dimension = self._model.get_sentence_embedding_dimension()
 
@@ -103,7 +101,7 @@ class SentenceTransformerEmbedder(Embedder):
                 convert_to_numpy=True,
                 show_progress_bar=False,
             )
-            
+
             # Convert numpy array to list
             embedding_list = embedding.tolist()
 
@@ -140,7 +138,7 @@ class SentenceTransformerEmbedder(Embedder):
             raise ValueError("All texts are empty")
 
         # Check cache for each text
-        embeddings: list[Optional[list[float]]] = []
+        embeddings: list[list[float] | None] = []
         texts_to_embed: list[tuple[int, str]] = []  # (index, text)
 
         for i, text in enumerate(valid_texts):
@@ -149,7 +147,7 @@ class SentenceTransformerEmbedder(Embedder):
                 if cached is not None:
                     embeddings.append(cached)
                     continue
-            
+
             # Need to embed this text
             embeddings.append(None)
             texts_to_embed.append((i, text))
@@ -158,7 +156,7 @@ class SentenceTransformerEmbedder(Embedder):
         if texts_to_embed:
             try:
                 batch_texts = [text for _, text in texts_to_embed]
-                
+
                 # Batch encode (efficient)
                 batch_embeddings = self._model.encode(
                     batch_texts,
@@ -168,9 +166,7 @@ class SentenceTransformerEmbedder(Embedder):
                 )
 
                 # Store results in correct positions
-                for (original_idx, text), embedding in zip(
-                    texts_to_embed, batch_embeddings
-                ):
+                for (original_idx, text), embedding in zip(texts_to_embed, batch_embeddings, strict=False):
                     embedding_list = embedding.tolist()
                     embeddings[original_idx] = embedding_list
 

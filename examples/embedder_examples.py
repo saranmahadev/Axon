@@ -13,21 +13,22 @@ This example shows:
 import asyncio
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
 
-from axon.embedders import (
-    OpenAIEmbedder,
-    VoyageAIEmbedder,
-    SentenceTransformerEmbedder,
-    HuggingFaceEmbedder,
-    get_global_cache,
-    clear_global_cache,
-)
 from axon.adapters import InMemoryAdapter
+from axon.embedders import (
+    HuggingFaceEmbedder,
+    OpenAIEmbedder,
+    SentenceTransformerEmbedder,
+    VoyageAIEmbedder,
+    clear_global_cache,
+    get_global_cache,
+)
 from axon.models import MemoryEntry, MemoryMetadata
 
 # Load environment variables from .env file
-env_path = Path(__file__).parent.parent / '.env'
+env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(dotenv_path=env_path)
 print(f"📝 Loaded environment from: {env_path}")
 print(f"   OpenAI API Key: {'✅ Found' if os.getenv('OPENAI_API_KEY') else '❌ Missing'}")
@@ -42,7 +43,7 @@ async def example_openai():
     print("\n" + "=" * 70)
     print("EXAMPLE 1: OpenAI Embeddings")
     print("=" * 70)
-    
+
     # Initialize embedder (requires OPENAI_API_KEY environment variable)
     api_key = os.getenv("OPENAI_API_KEY", "sk-test-key")
     embedder = OpenAIEmbedder(
@@ -50,29 +51,29 @@ async def example_openai():
         model="text-embedding-3-small",  # 1536 dimensions, cost-effective
         cache_enabled=True,
     )
-    
+
     print(f"Model: {embedder.model_name}")
     print(f"Dimension: {embedder.get_dimension()}")
-    
+
     # Embed single text
     text = "I love Python programming"
     embedding = await embedder.embed(text)
     print(f"\nEmbedding for '{text}':")
     print(f"  Vector length: {len(embedding)}")
     print(f"  First 5 values: {embedding[:5]}")
-    
+
     # Embed again (should hit cache)
     cache = get_global_cache()
     stats_before = cache.get_stats()
-    
+
     embedding2 = await embedder.embed(text)
     stats_after = cache.get_stats()
-    
-    print(f"\nCache effectiveness:")
+
+    print("\nCache effectiveness:")
     print(f"  Hits before: {stats_before['hits']}")
     print(f"  Hits after: {stats_after['hits']}")
     print(f"  Hit rate: {stats_after['hit_rate_percent']:.1f}%")
-    
+
     # Batch embedding
     texts = [
         "Machine learning is fascinating",
@@ -81,7 +82,7 @@ async def example_openai():
     ]
     embeddings = await embedder.embed_batch(texts)
     print(f"\nBatch embedded {len(embeddings)} texts")
-    
+
     print("✅ OpenAI embeddings working perfectly!")
 
 
@@ -93,7 +94,7 @@ async def example_voyage():
     print("\n" + "=" * 70)
     print("EXAMPLE 2: Voyage AI Embeddings")
     print("=" * 70)
-    
+
     # Initialize embedder (requires VOYAGE_API_KEY environment variable)
     api_key = os.getenv("VOYAGE_API_KEY", "pa-test-key")
     embedder = VoyageAIEmbedder(
@@ -101,17 +102,17 @@ async def example_voyage():
         model="voyage-2",  # 1024 dimensions, general purpose
         cache_enabled=True,
     )
-    
+
     print(f"Model: {embedder.model_name}")
     print(f"Dimension: {embedder.get_dimension()}")
-    
+
     # Embed technical text
     text = "def quicksort(arr): return sorted(arr)"
     embedding = await embedder.embed(text)
-    print(f"\nEmbedding for code snippet:")
+    print("\nEmbedding for code snippet:")
     print(f"  Vector length: {len(embedding)}")
     print(f"  First 5 values: {embedding[:5]}")
-    
+
     # Batch with different domains
     texts = [
         "SELECT * FROM users WHERE active = true",
@@ -130,24 +131,24 @@ async def example_sentence_transformer():
     print("\n" + "=" * 70)
     print("EXAMPLE 3: Sentence Transformers (Local & Free)")
     print("=" * 70)
-    
+
     # Initialize embedder (downloads model on first use, ~90MB)
     embedder = SentenceTransformerEmbedder(
         model_name="all-MiniLM-L6-v2",  # 384 dimensions, fast & lightweight
         cache_enabled=True,
     )
-    
+
     print(f"Model: {embedder.model_name}")
     print(f"Dimension: {embedder.get_dimension()}")
     print("Note: Runs locally, no API costs!")
-    
+
     # Embed conversational text
     text = "How do I reset my password?"
     embedding = await embedder.embed(text)
     print(f"\nEmbedding for '{text}':")
     print(f"  Vector length: {len(embedding)}")
     print(f"  First 5 values: {embedding[:5]}")
-    
+
     # Batch FAQ embeddings
     faqs = [
         "What are your business hours?",
@@ -167,24 +168,24 @@ async def example_huggingface():
     print("\n" + "=" * 70)
     print("EXAMPLE 4: HuggingFace BGE Embeddings (Local & Free)")
     print("=" * 70)
-    
+
     # Initialize embedder (downloads model on first use, ~400MB)
     embedder = HuggingFaceEmbedder(
         model_name="BAAI/bge-base-en-v1.5",  # 768 dimensions, high quality
         cache_enabled=True,
     )
-    
+
     print(f"Model: {embedder.model_name}")
     print(f"Dimension: {embedder.get_dimension()}")
     print("Note: State-of-the-art quality, runs locally!")
-    
+
     # Embed semantic search query
     text = "Best practices for microservices architecture"
     embedding = await embedder.embed(text)
     print(f"\nEmbedding for '{text}':")
     print(f"  Vector length: {len(embedding)}")
     print(f"  First 5 values: {embedding[:5]}")
-    
+
     # Batch document embeddings
     docs = [
         "Microservices communicate via REST APIs or message queues",
@@ -203,43 +204,45 @@ async def example_cache_comparison():
     print("\n" + "=" * 70)
     print("EXAMPLE 5: Cache Effectiveness Across Embedders")
     print("=" * 70)
-    
+
     # Clear cache for fresh start
     clear_global_cache()
-    
+
     # Create embedders - include ALL 4 if API keys available
     embedders = []
-    
+
     # Try adding OpenAI if API key exists
     openai_key = os.getenv("OPENAI_API_KEY")
     if openai_key:
         embedders.append(("OpenAI", OpenAIEmbedder(api_key=openai_key, cache_enabled=True)))
         print("✅ OpenAI embedder added")
-    
+
     # Try adding Voyage if API key exists
     voyage_key = os.getenv("VOYAGE_API_KEY")
     if voyage_key:
         embedders.append(("VoyageAI", VoyageAIEmbedder(api_key=voyage_key, cache_enabled=True)))
         print("✅ Voyage AI embedder added")
-    
+
     # Always add local models
     embedders.append(("SentenceTransformer", SentenceTransformerEmbedder(cache_enabled=True)))
     embedders.append(("HuggingFace", HuggingFaceEmbedder(cache_enabled=True)))
     print("✅ Local embedders added")
-    
+
     text = "The quick brown fox jumps over the lazy dog"
-    
+
     print(f"\nTesting cache effectiveness with {len(embedders)} embedders:\n")
     for name, embedder in embedders:
         # First embed (cache miss)
         await embedder.embed(text)
-        
+
         # Second embed (cache hit)
         await embedder.embed(text)
-        
+
         stats = get_global_cache().get_stats()
-        print(f"{name:20} - Hits: {stats['hits']:2}, Misses: {stats['misses']:2}, Hit Rate: {stats['hit_rate_percent']:.1f}%")
-    
+        print(
+            f"{name:20} - Hits: {stats['hits']:2}, Misses: {stats['misses']:2}, Hit Rate: {stats['hit_rate_percent']:.1f}%"
+        )
+
     print("\n✅ Cache working perfectly - second embeds hit cache!")
 
 
@@ -251,11 +254,11 @@ async def example_semantic_search():
     print("\n" + "=" * 70)
     print("EXAMPLE 6: Semantic Search with Embedder + InMemoryAdapter")
     print("=" * 70)
-    
+
     # Use local embedder for fast, free search
     embedder = SentenceTransformerEmbedder(cache_enabled=True)
     adapter = InMemoryAdapter()
-    
+
     # Store knowledge base
     knowledge_base = [
         "Python is a high-level programming language",
@@ -264,7 +267,7 @@ async def example_semantic_search():
         "Docker containers package applications with dependencies",
         "Kubernetes orchestrates containerized applications",
     ]
-    
+
     print("Storing knowledge base...")
     for idx, text in enumerate(knowledge_base):
         embedding = await embedder.embed(text)
@@ -275,29 +278,29 @@ async def example_semantic_search():
             metadata=MemoryMetadata(tags=["knowledge_base"], importance=0.8),
         )
         await adapter.save(entry)
-    
+
     print(f"Stored {len(knowledge_base)} entries")
-    
+
     # Semantic search queries
     queries = [
         "What language is good for AI?",
         "How to deploy applications?",
         "Frontend development tools?",
     ]
-    
+
     for query in queries:
         print(f"\nQuery: '{query}'")
-        
+
         # Embed query
         query_embedding = await embedder.embed(query)
-        
+
         # Search with cosine similarity (k=2 for top 2 results)
         results = await adapter.query(
             vector=query_embedding,
             k=2,
         )
-        
-        print(f"  Top results:")
+
+        print("  Top results:")
         for i, result in enumerate(results, 1):
             print(f"    {i}. {result.text}")
 
@@ -310,7 +313,7 @@ def example_embedder_selection_guide():
     print("\n" + "=" * 70)
     print("EXAMPLE 7: Embedder Selection Guide")
     print("=" * 70)
-    
+
     guide = """
     ┌─────────────────────┬──────────┬──────┬───────────┬─────────────────┐
     │ Embedder            │ Cost     │ Dims │ Quality   │ Best For        │
@@ -353,7 +356,7 @@ def example_embedder_selection_guide():
        - Production: OpenAI (reliable, scalable)
        - Switch by changing one line of code!
     """
-    
+
     print(guide)
 
 
@@ -366,33 +369,33 @@ async def main():
     print("=" * 70)
     print(" AXON MEMORY SDK - EMBEDDER EXAMPLES")
     print("=" * 70)
-    
+
     # Run API-based examples if keys are available
     if os.getenv("OPENAI_API_KEY"):
         print("\n🔑 OpenAI API key detected - running OpenAI example...")
         await example_openai()
     else:
         print("\n⏭️  Skipping OpenAI example (no API key)")
-    
+
     if os.getenv("VOYAGE_API_KEY"):
         print("\n🔑 Voyage API key detected - running Voyage AI example...")
         await example_voyage()
     else:
         print("\n⏭️  Skipping Voyage AI example (no API key)")
-    
+
     # Free local embedders (always work)
     await example_sentence_transformer()
     await example_huggingface()
-    
+
     # Cache comparison (automatically uses available embedders)
     await example_cache_comparison()
-    
+
     # Semantic search demo
     await example_semantic_search()
-    
+
     # Selection guide
     example_embedder_selection_guide()
-    
+
     print("\n" + "=" * 70)
     print(" ALL EXAMPLES COMPLETED!")
     print("=" * 70)

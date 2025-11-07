@@ -81,9 +81,7 @@ class Filter(BaseModel):
 
     # Temporal filters
     date_range: DateRange | None = Field(None, description="Filter by date range")
-    older_than_days: int | None = Field(
-        None, ge=0, description="Filter entries older than N days"
-    )
+    older_than_days: int | None = Field(None, ge=0, description="Filter entries older than N days")
 
     # Classification filters
     privacy_level: PrivacyLiteral | None = Field(None, description="Filter by privacy level")

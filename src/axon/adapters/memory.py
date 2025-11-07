@@ -90,9 +90,7 @@ class InMemoryAdapter(StorageAdapter):
 
         # Handle vector query (semantic search)
         # Get all entries with embeddings
-        entries_with_embeddings = [
-            entry for entry in self._storage.values() if entry.has_embedding
-        ]
+        entries_with_embeddings = [entry for entry in self._storage.values() if entry.has_embedding]
 
         # Apply metadata filter if provided
         if filter is not None:
@@ -130,10 +128,7 @@ class InMemoryAdapter(StorageAdapter):
         return [entry for _, entry in similarities[:k]]
 
     async def _text_search(
-        self,
-        query_text: str,
-        k: int,
-        filter: Filter | None = None
+        self, query_text: str, k: int, filter: Filter | None = None
     ) -> list[MemoryEntry]:
         """Perform simple text-based search when no embeddings are available.
 
@@ -163,25 +158,25 @@ class InMemoryAdapter(StorageAdapter):
 
         for entry in entries:
             text_lower = entry.text.lower()
-            
+
             # Calculate simple relevance score
             score = 0.0
-            
+
             # Exact phrase match (highest score)
             if query_lower in text_lower:
                 score += 10.0
-            
+
             # Word matches
             text_words = set(text_lower.split())
             matching_words = query_words & text_words
             score += len(matching_words) * 2.0
-            
+
             # Tag matches
             if entry.metadata.tags:
-                tag_words = set(word.lower() for tag in entry.metadata.tags for word in tag.split())
+                tag_words = {word.lower() for tag in entry.metadata.tags for word in tag.split()}
                 matching_tag_words = query_words & tag_words
                 score += len(matching_tag_words) * 1.5
-            
+
             # Only include entries with some relevance
             if score > 0:
                 scored_entries.append((score, entry))

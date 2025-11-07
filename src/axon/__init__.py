@@ -6,7 +6,7 @@ for building intelligent LLM applications.
 
 Example:
     >>> from axon import MemorySystem, MemoryEntry, Policy
-    >>> 
+    >>>
     >>> mem = MemorySystem(policy=my_policy)
     >>> mem.store(MemoryEntry(text="User prefers sci-fi", metadata={"user_id": "u123"}))
     >>> results = mem.recall("What does the user like?", k=3)
@@ -20,17 +20,25 @@ Key Features:
     - Privacy and encryption hooks
 """
 
+from typing import TYPE_CHECKING
+
 from .adapters import InMemoryAdapter, StorageAdapter
 from .embedders import (
     Embedder,
     EmbeddingCache,
-    HuggingFaceEmbedder,
-    OpenAIEmbedder,
-    SentenceTransformerEmbedder,
-    VoyageAIEmbedder,
     clear_global_cache,
     get_global_cache,
 )
+
+# Lazy imports for heavy dependencies
+if TYPE_CHECKING:
+    from .embedders import (
+        HuggingFaceEmbedder,
+        OpenAIEmbedder,
+        SentenceTransformerEmbedder,
+        VoyageAIEmbedder,
+    )
+
 from .models import (
     DateRange,
     Filter,
@@ -42,6 +50,28 @@ from .models import (
     ProvenanceEvent,
     SourceType,
 )
+
+
+def __getattr__(name: str):
+    """Lazy load heavy embedders to improve import time."""
+    if name == "OpenAIEmbedder":
+        from .embedders import OpenAIEmbedder
+
+        return OpenAIEmbedder
+    elif name == "VoyageAIEmbedder":
+        from .embedders import VoyageAIEmbedder
+
+        return VoyageAIEmbedder
+    elif name == "HuggingFaceEmbedder":
+        from .embedders import HuggingFaceEmbedder
+
+        return HuggingFaceEmbedder
+    elif name == "SentenceTransformerEmbedder":
+        from .embedders import SentenceTransformerEmbedder
+
+        return SentenceTransformerEmbedder
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __version__ = "0.1.0"
 

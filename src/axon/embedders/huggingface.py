@@ -6,8 +6,6 @@ embedding models, particularly BGE (BAAI General Embedding) models.
 
 from __future__ import annotations
 
-from typing import Optional
-
 import torch
 from transformers import AutoModel, AutoTokenizer
 
@@ -41,7 +39,7 @@ class HuggingFaceEmbedder(Embedder):
         self,
         model_name: str = "BAAI/bge-base-en-v1.5",
         cache_enabled: bool = True,
-        device: Optional[str] = None,
+        device: str | None = None,
     ):
         """Initialize HuggingFace embedder.
 
@@ -98,9 +96,7 @@ class HuggingFaceEmbedder(Embedder):
             Pooled tensor
         """
         token_embeddings = model_output[0]  # First element of model_output
-        input_mask_expanded = (
-            attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
-        )
+        input_mask_expanded = attention_mask.unsqueeze(-1).expand(token_embeddings.size()).float()
         return torch.sum(token_embeddings * input_mask_expanded, 1) / torch.clamp(
             input_mask_expanded.sum(1), min=1e-9
         )
@@ -140,9 +136,7 @@ class HuggingFaceEmbedder(Embedder):
             # Generate embedding
             with torch.no_grad():
                 model_output = self._model(**encoded_input)
-                embedding = self._mean_pooling(
-                    model_output, encoded_input["attention_mask"]
-                )
+                embedding = self._mean_pooling(model_output, encoded_input["attention_mask"])
                 # Normalize (important for BGE models)
                 embedding = torch.nn.functional.normalize(embedding, p=2, dim=1)
 
@@ -182,7 +176,7 @@ class HuggingFaceEmbedder(Embedder):
             raise ValueError("All texts are empty")
 
         # Check cache for each text
-        embeddings: list[Optional[list[float]]] = []
+        embeddings: list[list[float] | None] = []
         texts_to_embed: list[tuple[int, str]] = []  # (index, text)
 
         for i, text in enumerate(valid_texts):
@@ -191,7 +185,7 @@ class HuggingFaceEmbedder(Embedder):
                 if cached is not None:
                     embeddings.append(cached)
                     continue
-            
+
             # Need to embed this text
             embeddings.append(None)
             texts_to_embed.append((i, text))
@@ -200,7 +194,7 @@ class HuggingFaceEmbedder(Embedder):
         if texts_to_embed:
             try:
                 batch_texts = [text for _, text in texts_to_embed]
-                
+
                 # Tokenize batch
                 encoded_input = self._tokenizer(
                     batch_texts,
@@ -217,14 +211,10 @@ class HuggingFaceEmbedder(Embedder):
                         model_output, encoded_input["attention_mask"]
                     )
                     # Normalize
-                    batch_embeddings = torch.nn.functional.normalize(
-                        batch_embeddings, p=2, dim=1
-                    )
+                    batch_embeddings = torch.nn.functional.normalize(batch_embeddings, p=2, dim=1)
 
                 # Store results in correct positions
-                for (original_idx, text), embedding in zip(
-                    texts_to_embed, batch_embeddings
-                ):
+                for (original_idx, text), embedding in zip(texts_to_embed, batch_embeddings, strict=False):
                     embedding_list = embedding.cpu().tolist()
                     embeddings[original_idx] = embedding_list
 

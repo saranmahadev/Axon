@@ -76,11 +76,9 @@ async def main():
     print("\n--- Filtered Search ---")
     # Only search programming-related entries
     filter_programming = Filter(custom={"topic": "programming"})
-    filtered_results = await adapter.query(
-        vector=query_vector, k=10, filter=filter_programming
-    )
+    filtered_results = await adapter.query(vector=query_vector, k=10, filter=filter_programming)
 
-    print(f"Filter: topic='programming'")
+    print("Filter: topic='programming'")
     print(f"Found {len(filtered_results)} matches:")
     for entry in filtered_results:
         print(f"  - {entry.text[:60]}...")

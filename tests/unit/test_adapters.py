@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pytest
 
-from axon import Filter, InMemoryAdapter, MemoryEntry, MemoryTier
+from axon import Filter, InMemoryAdapter, MemoryEntry
 
 
 class TestInMemoryAdapter:
@@ -81,13 +81,11 @@ class TestInMemoryAdapter:
     @pytest.mark.asyncio
     async def test_bulk_save(self, adapter):
         """Test bulk saving multiple entries."""
-        entries = [
-            MemoryEntry(text=f"Entry {i}", type="note") for i in range(5)
-        ]
+        entries = [MemoryEntry(text=f"Entry {i}", type="note") for i in range(5)]
         ids = await adapter.bulk_save(entries)
 
         assert len(ids) == 5
-        for entry_id, entry in zip(ids, entries):
+        for entry_id, entry in zip(ids, entries, strict=False):
             assert entry_id == entry.id
             retrieved = await adapter.get(entry_id)
             assert retrieved.text == entry.text
@@ -150,9 +148,7 @@ class TestInMemoryAdapter:
 
         # Query with filter for "tech" category
         filter_tech = Filter(custom={"category": "tech"})
-        results = await adapter.query(
-            vector=[1.0, 0.0, 0.0], k=10, filter=filter_tech
-        )
+        results = await adapter.query(vector=[1.0, 0.0, 0.0], k=10, filter=filter_tech)
 
         assert len(results) == 1
         assert results[0].id == entry1.id
@@ -237,9 +233,7 @@ class TestInMemoryAdapter:
 
     def test_list_ids(self, adapter):
         """Test list_ids method."""
-        entries = [
-            MemoryEntry(text=f"Entry {i}", type="note") for i in range(3)
-        ]
+        entries = [MemoryEntry(text=f"Entry {i}", type="note") for i in range(3)]
         ids = adapter.bulk_save_sync(entries)
 
         listed_ids = adapter.list_ids()
@@ -266,18 +260,14 @@ class TestInMemoryAdapter:
 
     def test_bulk_save_sync(self, adapter):
         """Test synchronous bulk_save wrapper."""
-        entries = [
-            MemoryEntry(text=f"Entry {i}", type="note") for i in range(3)
-        ]
+        entries = [MemoryEntry(text=f"Entry {i}", type="note") for i in range(3)]
         ids = adapter.bulk_save_sync(entries)
         assert len(ids) == 3
 
     def test_query_sync(self, adapter, sample_entry_with_embedding):
         """Test synchronous query wrapper."""
         adapter.save_sync(sample_entry_with_embedding)
-        results = adapter.query_sync(
-            vector=[0.1, 0.2, 0.3, 0.4, 0.5], k=1
-        )
+        results = adapter.query_sync(vector=[0.1, 0.2, 0.3, 0.4, 0.5], k=1)
         assert len(results) == 1
 
     def test_reindex_sync(self, adapter):
