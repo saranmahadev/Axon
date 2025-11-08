@@ -51,6 +51,15 @@ from .models import (
     SourceType,
 )
 
+from .core.logging_config import (
+    get_logger,
+    setup_structured_logging,
+    set_correlation_id,
+    get_correlation_id,
+    clear_correlation_id,
+    log_performance,
+)
+
 
 def __getattr__(name: str):
     """Lazy load heavy embedders to improve import time."""
@@ -101,4 +110,11 @@ __all__ = [
     "EmbeddingCache",
     "get_global_cache",
     "clear_global_cache",
+    # Logging
+    "get_logger",
+    "setup_structured_logging",
+    "set_correlation_id",
+    "get_correlation_id",
+    "clear_correlation_id",
+    "log_performance",
 ]

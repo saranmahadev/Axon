@@ -148,6 +148,55 @@ events = await system.export_audit_log(operation=OperationType.STORE)
   - Detects 5 PII types: email, phone, SSN, credit cards, IP addresses
   - Privacy level mapping: SSN/credit cards → RESTRICTED, email/phone/IP → INTERNAL
   - Most restrictive level wins when multiple PII types detected
+
+### Structured Logging
+
+**Logging System** (`src/axon/core/logging_config.py`)
+- Production-grade structured logging with JSON formatting for machine readability
+- Correlation ID tracking for distributed request tracing
+- Automatic performance metrics via decorators
+- Features:
+  - **JSONFormatter** - Outputs logs as JSON with timestamp, level, logger, message, correlation ID, and custom fields
+  - **StructuredLogger** - Enhanced logger with convenience methods: `log_operation()`, `log_metric()`, `log_error()`
+  - **Correlation IDs** - Async-safe context propagation via ContextVar for request tracking
+  - **Performance Decorator** - `@log_performance()` automatically logs latency and errors for async/sync functions
+  - **Environment Configuration** - AXON_LOG_LEVEL (DEBUG/INFO/WARNING/ERROR), AXON_STRUCTURED_LOGGING (true/false)
+
+**Usage:**
+```python
+from axon import get_logger, set_correlation_id, log_performance
+
+# Basic structured logging
+logger = get_logger(__name__)
+logger.info("Processing request", extra={"user_id": "user_123", "operation": "store"})
+
+# Correlation ID for request tracing
+set_correlation_id("req-abc-123")
+logger.info("Request started")  # Correlation ID automatically included
+
+# Performance tracking
+@log_performance("store_operation")
+async def store_memory(content: str) -> str:
+    # Operation code
+    return entry_id  # Latency automatically logged
+
+# Custom metrics
+logger.log_metric("cache_hit_rate", 0.85, unit="%", operation="recall")
+```
+
+**JSON Output Example:**
+```json
+{
+  "timestamp": "2025-11-08T10:30:45.123456Z",
+  "level": "INFO",
+  "logger": "axon.core.memory_system",
+  "message": "Memory stored successfully",
+  "correlation_id": "req-abc123",
+  "user_id": "user_456",
+  "entry_id": "entry_789",
+  "latency_ms": 12.5
+}
+```
   - PII detection metadata stored in `entry.metadata.pii_detection`
   - Can be disabled via `enable_pii_detection=False`
 
