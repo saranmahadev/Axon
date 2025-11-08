@@ -139,6 +139,68 @@ events = await system.export_audit_log(operation=OperationType.STORE)
 - `system.get_provenance_chain(entry_id)` - Trace entry lineage back to source
 - `system.find_derived_entries(entry_id)` - Find all summaries/transformations of an entry
 
+### Privacy & PII Detection
+
+**PIIDetector** (`src/axon/core/privacy.py`)
+- Automatic detection of Personally Identifiable Information (PII) using regex patterns
+- Auto-classifies privacy levels based on detected PII types
+- Features:
+  - Detects 5 PII types: email, phone, SSN, credit cards, IP addresses
+  - Privacy level mapping: SSN/credit cards → RESTRICTED, email/phone/IP → INTERNAL
+  - Most restrictive level wins when multiple PII types detected
+  - PII detection metadata stored in `entry.metadata.pii_detection`
+  - Can be disabled via `enable_pii_detection=False`
+
+**PIIDetectionResult:**
+- `detected_types` - Set of PII type names found
+- `recommended_privacy_level` - Recommended PrivacyLevel based on detected PII
+- `has_pii` - Boolean indicating if any PII was detected
+- `details` - Dict with count of each PII type
+
+**Privacy Levels (PrivacyLevel enum):**
+- `PUBLIC` - No PII detected, safe for public access
+- `INTERNAL` - Contains emails, phone numbers, or IP addresses
+- `SENSITIVE` - Business-sensitive but not PII (reserved for future use)
+- `RESTRICTED` - Contains SSN, credit cards, or other highly sensitive PII
+
+**Usage:**
+```python
+from axon import MemorySystem
+from axon.core import PIIDetector
+from axon.models.base import PrivacyLevel
+
+# Automatic PII detection (default)
+system = MemorySystem(config=config)  # enable_pii_detection=True by default
+entry_id = await system.store("Contact sales@company.com")
+
+# Retrieve and check privacy level
+tier, entry = await system._get_entry_by_id(entry_id)
+print(entry.metadata.privacy_level)  # PrivacyLevel.INTERNAL
+print(entry.metadata.pii_detection)  # {"detected_types": ["email"], ...}
+
+# User override of privacy level
+entry_id = await system.store(
+    "Email: user@example.com",
+    metadata={"privacy_level": PrivacyLevel.RESTRICTED}
+)
+
+# Filter recalls by privacy level
+restricted = await system.recall("data", k=10, filter_dict={"privacy_level": PrivacyLevel.RESTRICTED})
+
+# Disable PII detection
+system_no_pii = MemorySystem(config=config, enable_pii_detection=False)
+```
+
+**Supported PII Patterns:**
+- **Email:** `user@example.com` → INTERNAL
+- **Phone:** `(555) 123-4567`, `555-123-4567` → INTERNAL
+- **IP Address:** `192.168.1.100` → INTERNAL
+- **SSN:** `123-45-6789`, `123456789` → RESTRICTED
+- **Credit Card:** `4532 1234 5678 9010`, `4532-1234-5678-9010` → RESTRICTED
+
+**Integration with Audit:**
+PII detection results are included in audit log metadata when `audit_logger` is enabled, providing complete compliance tracking.
+
 ### Storage Adapters
 
 All adapters implement `StorageAdapter` interface (`src/axon/adapters/base.py`):

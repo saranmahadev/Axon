@@ -15,6 +15,7 @@ from .memory_system import MemorySystem, TraceEvent
 from .policies import EphemeralPolicy, PersistentPolicy, SessionPolicy
 from .policy import Policy
 from .policy_engine import PolicyEngine
+from .privacy import PIIDetector, PIIDetectionResult
 from .router import Router
 from .scoring import ScoringConfig, ScoringEngine
 from .summarizer import LLMSummarizer, Summarizer
@@ -35,5 +36,7 @@ __all__ = [
     "Summarizer",
     "LLMSummarizer",
     "AuditLogger",
+    "PIIDetector",
+    "PIIDetectionResult",
     "templates",
 ]

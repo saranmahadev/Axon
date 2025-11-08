@@ -19,6 +19,7 @@ from axon.core.adapter_registry import AdapterRegistry
 from axon.core.audit import AuditLogger
 from axon.core.config import MemoryConfig
 from axon.core.policy_engine import PolicyEngine
+from axon.core.privacy import PIIDetector
 from axon.core.router import Router
 from axon.core.scoring import ScoringEngine
 from axon.models.audit import EventStatus, OperationType
@@ -107,6 +108,8 @@ class MemorySystem:
         scoring_engine: ScoringEngine | None = None,
         embedder: Any | None = None,
         audit_logger: Optional[AuditLogger] = None,
+        pii_detector: Optional[PIIDetector] = None,
+        enable_pii_detection: bool = True,
     ):
         """
         Initialize MemorySystem with configuration and optional components.
@@ -123,6 +126,8 @@ class MemorySystem:
             scoring_engine: Optional pre-configured ScoringEngine instance
             embedder: Optional Embedder instance for generating embeddings (required for vector adapters)
             audit_logger: Optional AuditLogger instance for audit trail tracking
+            pii_detector: Optional PIIDetector instance for privacy detection
+            enable_pii_detection: Whether to enable automatic PII detection (default: True)
 
         Raises:
             ValueError: If config is invalid or missing required tiers
@@ -137,6 +142,8 @@ class MemorySystem:
         self.config = config
         self.embedder = embedder
         self.audit_logger = audit_logger
+        self.enable_pii_detection = enable_pii_detection
+        self.pii_detector = pii_detector or (PIIDetector() if enable_pii_detection else None)
 
         # Initialize or use provided components
         self.registry = registry or AdapterRegistry()
@@ -265,6 +272,11 @@ class MemorySystem:
             # Generate unique ID
             entry_id = str(uuid.uuid4())
 
+            # Detect PII if enabled
+            pii_result = None
+            if self.enable_pii_detection and self.pii_detector:
+                pii_result = self.pii_detector.detect(content)
+
             # Build metadata
             entry_metadata = MemoryMetadata(
                 importance=importance,
@@ -274,10 +286,25 @@ class MemorySystem:
                 access_count=0,
             )
 
+            # Set privacy level from PII detection if not provided in metadata
+            if pii_result and not metadata:
+                entry_metadata.privacy_level = pii_result.recommended_privacy_level
+            elif pii_result and metadata and "privacy_level" not in metadata:
+                entry_metadata.privacy_level = pii_result.recommended_privacy_level
+
             # Merge user metadata if provided
             if metadata:
-                # Store custom metadata in a nested dict to avoid conflicts
-                entry_metadata.custom = metadata
+                # Apply custom metadata fields directly to entry_metadata
+                for key, value in metadata.items():
+                    setattr(entry_metadata, key, value)
+
+            # Store PII detection results in metadata as a custom field
+            if pii_result and pii_result.has_pii:
+                entry_metadata.pii_detection = {
+                    "detected_types": list(pii_result.detected_types),
+                    "has_pii": pii_result.has_pii,
+                    "details": pii_result.details,
+                }
 
             # Create memory entry
             entry = MemoryEntry(id=entry_id, text=content, metadata=entry_metadata)
@@ -306,17 +333,24 @@ class MemorySystem:
 
             # Log audit event
             if self.audit_logger:
+                audit_metadata = {
+                    "importance": importance,
+                    "tags": tags or [],
+                    "tier": tier,
+                    "has_embedding": entry.embedding is not None,
+                    "privacy_level": entry.metadata.privacy_level.value if entry.metadata.privacy_level else None,
+                }
+                # Add PII detection info if available
+                if pii_result and pii_result.has_pii:
+                    audit_metadata["pii_detected"] = True
+                    audit_metadata["pii_types"] = list(pii_result.detected_types)
+
                 await self.audit_logger.log_event(
                     operation=OperationType.STORE,
                     user_id=entry.metadata.user_id,
                     session_id=entry.metadata.session_id,
                     entry_ids=[entry_id],
-                    metadata={
-                        "importance": importance,
-                        "tags": tags or [],
-                        "tier": tier,
-                        "has_embedding": entry.embedding is not None,
-                    },
+                    metadata=audit_metadata,
                     status=EventStatus.SUCCESS,
                     duration_ms=duration_ms,
                 )

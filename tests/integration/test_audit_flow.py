@@ -3,9 +3,9 @@
 import pytest
 from datetime import datetime, timedelta
 
-from axon import MemorySystem
-from axon.core import AuditLogger, MemoryConfig
+from axon.core import AuditLogger, MemoryConfig, MemorySystem
 from axon.core.policies import PersistentPolicy
+from axon.core.templates import DEVELOPMENT_CONFIG
 from axon.models.audit import EventStatus, OperationType
 
 
@@ -17,9 +17,7 @@ class TestMemorySystemAuditIntegration:
     async def test_store_operation_logged(self):
         """Test that store operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Store an entry
@@ -43,9 +41,7 @@ class TestMemorySystemAuditIntegration:
     async def test_recall_operation_logged(self):
         """Test that recall operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Store some entries
@@ -73,9 +69,7 @@ class TestMemorySystemAuditIntegration:
     async def test_export_operation_logged(self):
         """Test that export operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Store entries
@@ -101,13 +95,7 @@ class TestMemorySystemAuditIntegration:
     async def test_compact_operation_logged(self):
         """Test that compact operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(
-                adapter_type="in_memory",
-                collection_name="test",
-                summarize_after=5,
-            )
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Store entries
@@ -133,9 +121,7 @@ class TestMemorySystemAuditIntegration:
     async def test_failed_store_logged(self):
         """Test that failed store operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Try to store invalid content
@@ -155,9 +141,7 @@ class TestMemorySystemAuditIntegration:
     async def test_failed_recall_logged(self):
         """Test that failed recall operations are logged."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Try to recall with invalid k
@@ -176,9 +160,7 @@ class TestMemorySystemAuditIntegration:
     async def test_export_audit_log_method(self):
         """Test the export_audit_log method on MemorySystem."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Perform operations
@@ -198,9 +180,7 @@ class TestMemorySystemAuditIntegration:
     async def test_export_audit_log_with_filters(self):
         """Test exporting audit log with filters."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Perform operations
@@ -216,9 +196,7 @@ class TestMemorySystemAuditIntegration:
 
     async def test_export_audit_log_without_logger_raises_error(self):
         """Test that export_audit_log raises error if no logger configured."""
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config)  # No audit_logger
 
         with pytest.raises(RuntimeError, match="No audit logger configured"):
@@ -227,9 +205,7 @@ class TestMemorySystemAuditIntegration:
     async def test_user_and_session_tracking(self):
         """Test that user_id and session_id are tracked from entry metadata."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Store with user_id and session_id in metadata
@@ -249,9 +225,7 @@ class TestMemorySystemAuditIntegration:
     async def test_multiple_operations_timeline(self):
         """Test that multiple operations create a complete audit trail."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)
 
         # Perform a sequence of operations
@@ -280,9 +254,7 @@ class TestMemorySystemAuditIntegration:
     async def test_audit_log_without_embedder(self):
         """Test audit logging works without embedder (text-only mode)."""
         audit_logger = AuditLogger()
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system = MemorySystem(config=config, audit_logger=audit_logger)  # No embedder
 
         # Store without embedding
@@ -297,9 +269,7 @@ class TestMemorySystemAuditIntegration:
     async def test_audit_performance_overhead(self):
         """Test that audit logging has minimal performance overhead."""
         # System without audit logger
-        config = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test")
-        )
+        config = DEVELOPMENT_CONFIG
         system_no_audit = MemorySystem(config=config)
 
         start = datetime.now()
@@ -309,9 +279,7 @@ class TestMemorySystemAuditIntegration:
 
         # System with audit logger
         audit_logger = AuditLogger()
-        config2 = MemoryConfig(
-            persistent=PersistentPolicy(adapter_type="in_memory", collection_name="test2")
-        )
+        config2 = DEVELOPMENT_CONFIG
         system_with_audit = MemorySystem(config=config2, audit_logger=audit_logger)
 
         start = datetime.now()

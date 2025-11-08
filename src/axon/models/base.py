@@ -30,15 +30,20 @@ class MemoryTier(str, Enum):
 class PrivacyLevel(str, Enum):
     """Privacy classification levels for memory entries.
 
+    Levels ordered from least to most restrictive:
+    PUBLIC < INTERNAL < SENSITIVE < RESTRICTED
+
     Attributes:
-        PUBLIC: Non-sensitive information, shareable
+        PUBLIC: Non-sensitive information, shareable publicly
+        INTERNAL: Internal use only (emails, phone numbers, IP addresses)
         SENSITIVE: Requires careful handling, limited sharing
-        PRIVATE: Confidential information, restricted access
+        RESTRICTED: Highly confidential (SSN, credit cards), maximum security
     """
 
     PUBLIC = "public"
+    INTERNAL = "internal"
     SENSITIVE = "sensitive"
-    PRIVATE = "private"
+    RESTRICTED = "restricted"
 
 
 class SourceType(str, Enum):
@@ -104,5 +109,5 @@ class ProvenanceEvent(BaseModel):
 
 # Type aliases for cleaner code
 SourceLiteral = Literal["app", "system", "agent"]
-PrivacyLiteral = Literal["public", "sensitive", "private"]
+PrivacyLiteral = Literal["public", "internal", "sensitive", "restricted"]
 MemoryTypeLiteral = Literal["note", "event", "conversation_turn", "profile", "embedding_summary"]
