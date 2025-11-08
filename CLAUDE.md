@@ -98,6 +98,47 @@ mypy src/axon
 **Filter** (`src/axon/models/filter.py`)
 - Declarative filtering for queries: user_id, session_id, tags, date ranges, privacy levels
 
+**AuditEvent** (`src/axon/models/audit.py`)
+- Structured audit trail for compliance and observability
+- Fields: event_id, timestamp, operation, user_id, session_id, entry_ids, metadata, status, error_message, duration_ms
+- Operation types: STORE, RECALL, FORGET, COMPACT, EXPORT, BULK_STORE, REINDEX
+- Status types: SUCCESS, FAILURE, PARTIAL
+
+### Audit System
+
+**AuditLogger** (`src/axon/core/audit.py`)
+- Thread-safe audit logging for tracking all memory operations
+- Features:
+  - Structured event logging with timestamps
+  - In-memory storage with optional file export
+  - Automatic rotation when max_events reached
+  - Query/filter capabilities by operation, user, session, status, time range
+  - JSON export for compliance and analysis
+
+**Usage:**
+```python
+from axon import MemorySystem
+from axon.core import AuditLogger, MemoryConfig
+from axon.models.audit import OperationType
+
+# Create audit logger
+audit_logger = AuditLogger(max_events=10000, enable_rotation=True)
+
+# Create MemorySystem with audit logging
+system = MemorySystem(config=config, audit_logger=audit_logger)
+
+# All operations are automatically logged
+await system.store("User prefers dark mode", importance=0.8)
+await system.recall("user preferences", k=5)
+
+# Query audit log
+events = await system.export_audit_log(operation=OperationType.STORE)
+```
+
+**Provenance Tracking:**
+- `system.get_provenance_chain(entry_id)` - Trace entry lineage back to source
+- `system.find_derived_entries(entry_id)` - Find all summaries/transformations of an entry
+
 ### Storage Adapters
 
 All adapters implement `StorageAdapter` interface (`src/axon/adapters/base.py`):

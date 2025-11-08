@@ -9,6 +9,7 @@ This module will contain:
 
 from . import templates
 from .adapter_registry import AdapterRegistry
+from .audit import AuditLogger
 from .config import MemoryConfig
 from .memory_system import MemorySystem, TraceEvent
 from .policies import EphemeralPolicy, PersistentPolicy, SessionPolicy
@@ -33,5 +34,6 @@ __all__ = [
     "TraceEvent",
     "Summarizer",
     "LLMSummarizer",
+    "AuditLogger",
     "templates",
 ]

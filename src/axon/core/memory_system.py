@@ -13,13 +13,15 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
+from typing import Any, Optional
 
 from axon.core.adapter_registry import AdapterRegistry
+from axon.core.audit import AuditLogger
 from axon.core.config import MemoryConfig
 from axon.core.policy_engine import PolicyEngine
 from axon.core.router import Router
 from axon.core.scoring import ScoringEngine
+from axon.models.audit import EventStatus, OperationType
 from axon.models.entry import MemoryEntry, MemoryMetadata
 from axon.models.filter import Filter
 
@@ -104,6 +106,7 @@ class MemorySystem:
         policy_engine: PolicyEngine | None = None,
         scoring_engine: ScoringEngine | None = None,
         embedder: Any | None = None,
+        audit_logger: Optional[AuditLogger] = None,
     ):
         """
         Initialize MemorySystem with configuration and optional components.
@@ -119,6 +122,7 @@ class MemorySystem:
             policy_engine: Optional pre-configured PolicyEngine instance
             scoring_engine: Optional pre-configured ScoringEngine instance
             embedder: Optional Embedder instance for generating embeddings (required for vector adapters)
+            audit_logger: Optional AuditLogger instance for audit trail tracking
 
         Raises:
             ValueError: If config is invalid or missing required tiers
@@ -132,6 +136,7 @@ class MemorySystem:
 
         self.config = config
         self.embedder = embedder
+        self.audit_logger = audit_logger
 
         # Initialize or use provided components
         self.registry = registry or AdapterRegistry()
@@ -299,6 +304,23 @@ class MemorySystem:
                 )
             )
 
+            # Log audit event
+            if self.audit_logger:
+                await self.audit_logger.log_event(
+                    operation=OperationType.STORE,
+                    user_id=entry.metadata.user_id,
+                    session_id=entry.metadata.session_id,
+                    entry_ids=[entry_id],
+                    metadata={
+                        "importance": importance,
+                        "tags": tags or [],
+                        "tier": tier,
+                        "has_embedding": entry.embedding is not None,
+                    },
+                    status=EventStatus.SUCCESS,
+                    duration_ms=duration_ms,
+                )
+
             return entry_id
 
         except Exception as e:
@@ -315,6 +337,18 @@ class MemorySystem:
                     error=str(e),
                 )
             )
+
+            # Log audit event for failure
+            if self.audit_logger:
+                await self.audit_logger.log_event(
+                    operation=OperationType.STORE,
+                    entry_ids=[entry_id] if entry_id else [],
+                    metadata={"tier": tier, "error_type": type(e).__name__},
+                    status=EventStatus.FAILURE,
+                    error_message=str(e),
+                    duration_ms=duration_ms,
+                )
+
             raise
 
     async def recall(
@@ -417,6 +451,29 @@ class MemorySystem:
                 )
             )
 
+            # Log audit event
+            if self.audit_logger:
+                # Extract user_id and session_id from filter if available
+                user_id = filter.user_id if filter else None
+                session_id = filter.session_id if filter else None
+
+                await self.audit_logger.log_event(
+                    operation=OperationType.RECALL,
+                    user_id=user_id,
+                    session_id=session_id,
+                    entry_ids=[entry.id for entry in results],
+                    metadata={
+                        "query": query,
+                        "k": k,
+                        "result_count": len(results),
+                        "tiers": tiers or "all",
+                        "min_importance": min_importance,
+                        "has_filter": filter is not None,
+                    },
+                    status=EventStatus.SUCCESS,
+                    duration_ms=duration_ms,
+                )
+
             return results
 
         except Exception as e:
@@ -432,6 +489,27 @@ class MemorySystem:
                     error=str(e),
                 )
             )
+
+            # Log audit event for failure
+            if self.audit_logger:
+                user_id = filter.user_id if filter else None
+                session_id = filter.session_id if filter else None
+
+                await self.audit_logger.log_event(
+                    operation=OperationType.RECALL,
+                    user_id=user_id,
+                    session_id=session_id,
+                    metadata={
+                        "query": query,
+                        "k": k,
+                        "tiers": tiers or "all",
+                        "error_type": type(e).__name__,
+                    },
+                    status=EventStatus.FAILURE,
+                    error_message=str(e),
+                    duration_ms=duration_ms,
+                )
+
             raise
 
     def _log_trace(self, event: TraceEvent):
@@ -664,6 +742,28 @@ class MemorySystem:
                     result_count=len(all_entries),
                     metadata={"filter": str(filter) if filter else None},
                 )
+            )
+
+        # Log audit event
+        if self.audit_logger:
+            # Extract user_id and session_id from filter if available
+            user_id = filter.user_id if filter else None
+            session_id = filter.session_id if filter else None
+
+            await self.audit_logger.log_event(
+                operation=OperationType.EXPORT,
+                user_id=user_id,
+                session_id=session_id,
+                entry_ids=[entry["id"] for entry in all_entries],
+                metadata={
+                    "tier": tier or "all",
+                    "total_entries": len(all_entries),
+                    "by_tier": stats_by_tier,
+                    "include_embeddings": include_embeddings,
+                    "has_filter": filter is not None,
+                },
+                status=EventStatus.SUCCESS,
+                duration_ms=duration_ms,
             )
 
         return export_data
@@ -1396,7 +1496,222 @@ class MemorySystem:
                 )
             )
 
+        # Log audit event
+        if self.audit_logger:
+            await self.audit_logger.log_event(
+                operation=OperationType.COMPACT,
+                metadata={
+                    "tier": tier or "multiple",
+                    "tiers_compacted": tiers_to_compact,
+                    "strategy": strategy,
+                    "threshold": threshold,
+                    "entries_before": total_before,
+                    "entries_after": total_after,
+                    "summaries_created": total_summaries,
+                    "groups_compacted": total_groups,
+                    "reduction_ratio": reduction_ratio,
+                    "dry_run": dry_run,
+                },
+                status=EventStatus.SUCCESS,
+                duration_ms=execution_time * 1000,
+            )
+
         return result
+
+    async def get_provenance_chain(self, entry_id: str) -> list[MemoryEntry]:
+        """
+        Get the complete provenance chain for an entry, tracing back to source.
+
+        Retrieves an entry and all its ancestor entries by following the
+        provenance metadata. This shows the complete lineage from the original
+        entry through all transformations (compactions, summarizations, etc.).
+
+        Args:
+            entry_id: ID of the entry to trace
+
+        Returns:
+            List of entries in chronological order (oldest first), including
+            the requested entry and all ancestors
+
+        Raises:
+            KeyError: If entry_id not found in any tier
+
+        Example:
+            ```python
+            # Get full lineage of a summarized entry
+            chain = await system.get_provenance_chain("summary_id")
+            for entry in chain:
+                print(f"{entry.id}: {entry.type} - {entry.text[:50]}")
+            ```
+        """
+        chain = []
+        current_id = entry_id
+
+        # Follow the chain backwards
+        visited = set()  # Prevent infinite loops
+
+        while current_id and current_id not in visited:
+            visited.add(current_id)
+
+            # Find the entry in any tier
+            entry = None
+            for tier_name in self.config.tiers.keys():
+                adapter = await self.registry.get_adapter(tier_name)
+                try:
+                    entry = await adapter.get(current_id)
+                    break
+                except KeyError:
+                    continue
+
+            if not entry:
+                # Entry not found - may have been deleted
+                break
+
+            chain.append(entry)
+
+            # Look for source entry IDs in provenance
+            if entry.metadata.provenance:
+                # Get the last provenance event (most recent action)
+                last_prov = entry.metadata.provenance[-1]
+
+                # Extract source IDs from metadata
+                if "summarized_ids" in last_prov.metadata:
+                    # This is a summary - get the first source ID
+                    source_ids = last_prov.metadata["summarized_ids"].split(",")
+                    if source_ids:
+                        current_id = source_ids[0].strip()
+                    else:
+                        break
+                else:
+                    # No more ancestors
+                    break
+            else:
+                # No provenance - this is the source
+                break
+
+        # Return in chronological order (oldest first)
+        return list(reversed(chain))
+
+    async def find_derived_entries(self, entry_id: str) -> list[MemoryEntry]:
+        """
+        Find all entries derived from a source entry.
+
+        Searches across all tiers for entries that have the given entry_id
+        in their provenance chain (i.e., summaries or transformations of
+        this entry).
+
+        Args:
+            entry_id: ID of the source entry
+
+        Returns:
+            List of entries that were derived from the source entry
+
+        Example:
+            ```python
+            # Find all summaries that include a specific entry
+            derived = await system.find_derived_entries("original_id")
+            print(f"Found {len(derived)} derived entries")
+            ```
+        """
+        derived = []
+
+        # Search all tiers
+        for tier_name in self.config.tiers.keys():
+            adapter = await self.registry.get_adapter(tier_name)
+
+            # Get all entries from this tier
+            try:
+                # Query with dummy vector to get all
+                all_entries = await adapter.query(vector=[0.0] * 384, k=100000, filter=None)
+
+                # Check each entry's provenance
+                for entry in all_entries:
+                    if entry.metadata.provenance:
+                        for prov_event in entry.metadata.provenance:
+                            # Check if entry_id is in the summarized IDs
+                            if "summarized_ids" in prov_event.metadata:
+                                source_ids = prov_event.metadata["summarized_ids"].split(",")
+                                source_ids = [sid.strip() for sid in source_ids]
+
+                                if entry_id in source_ids:
+                                    derived.append(entry)
+                                    break  # Don't add same entry twice
+
+            except Exception:
+                # If query fails, try listing IDs
+                try:
+                    entry_ids = await adapter.list_ids()
+                    for eid in entry_ids:
+                        try:
+                            entry = await adapter.get(eid)
+                            if entry.metadata.provenance:
+                                for prov_event in entry.metadata.provenance:
+                                    if "summarized_ids" in prov_event.metadata:
+                                        source_ids = prov_event.metadata["summarized_ids"].split(",")
+                                        source_ids = [sid.strip() for sid in source_ids]
+
+                                        if entry_id in source_ids:
+                                            derived.append(entry)
+                                            break
+                        except KeyError:
+                            continue
+                except Exception:
+                    # Skip this tier
+                    continue
+
+        return derived
+
+    async def export_audit_log(
+        self,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
+        operation: Optional[OperationType] = None,
+        user_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        Export audit events for compliance or analysis.
+
+        Args:
+            start_time: Filter events after this timestamp
+            end_time: Filter events before this timestamp
+            operation: Filter by operation type
+            user_id: Filter by user ID
+            session_id: Filter by session ID
+
+        Returns:
+            List of audit events as dictionaries
+
+        Raises:
+            RuntimeError: If no audit logger is configured
+
+        Example:
+            ```python
+            # Export all audit events
+            events = await system.export_audit_log()
+
+            # Export events for a specific user
+            events = await system.export_audit_log(user_id="user_123")
+
+            # Export recent events
+            from datetime import datetime, timedelta
+            events = await system.export_audit_log(
+                start_time=datetime.now() - timedelta(days=7)
+            )
+            ```
+        """
+        if not self.audit_logger:
+            raise RuntimeError("No audit logger configured. Initialize MemorySystem with audit_logger parameter.")
+
+        events = await self.audit_logger.get_events(
+            operation=operation,
+            user_id=user_id,
+            session_id=session_id,
+            start_time=start_time,
+            end_time=end_time,
+        )
+
+        return [event.to_dict() for event in events]
 
     async def close(self):
         """

@@ -3,6 +3,7 @@
 This module exports all core data models used throughout the Axon SDK.
 """
 
+from .audit import AuditEvent, EventStatus, OperationType
 from .base import (
     MemoryEntryType,
     MemoryTier,
@@ -26,4 +27,8 @@ __all__ = [
     # Filter models
     "Filter",
     "DateRange",
+    # Audit models
+    "AuditEvent",
+    "OperationType",
+    "EventStatus",
 ]
