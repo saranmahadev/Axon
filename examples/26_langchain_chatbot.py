@@ -19,12 +19,22 @@ Run: python examples/26_langchain_chatbot.py
 
 import asyncio
 import os
+from pathlib import Path
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    pass  # python-dotenv not installed
 
 # Set OpenAI API key (or use environment variable)
 # os.environ["OPENAI_API_KEY"] = "your-api-key-here"
 
 from axon import MemorySystem
-from axon.core.templates import balanced
+from axon.core.templates import DEVELOPMENT_CONFIG
 
 try:
     from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
@@ -49,11 +59,11 @@ async def demo_basic_chatbot():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create chat memory
     memory = AxonChatMemory(
-        system, session_id="user_alice", k_messages=10, use_semantic_search=False
+        system, session_id="user_alice", k_messages=10, use_semantic_search=False, return_messages=True
     )
 
     # Create LLM
@@ -114,10 +124,10 @@ async def demo_semantic_memory():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create chat memory with semantic search enabled
-    memory = AxonChatMemory(system, session_id="user_bob", k_messages=5, use_semantic_search=True)
+    memory = AxonChatMemory(system, session_id="user_bob", k_messages=5, use_semantic_search=True, return_messages=True)
 
     # Create LLM
     llm = ChatOpenAI(model="gpt-3.5-turbo", temperature=0.7)
@@ -181,7 +191,7 @@ async def demo_multi_user_isolation():
     print()
 
     # Create shared Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create separate memories for different users
     alice_memory = AxonChatMemory(system, session_id="user_alice_2")

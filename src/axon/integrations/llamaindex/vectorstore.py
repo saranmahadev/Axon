@@ -165,11 +165,13 @@ class AxonLlamaIndexVectorStore(BasePydanticVectorStore):
             # Extract text content
             text = node.get_content(metadata_mode="none")
 
-            # Extract embedding
-            embedding = node.get_embedding()
-            if embedding is None:
+            # Extract embedding - check if it exists before calling get_embedding()
+            # get_embedding() raises ValueError if embedding is None
+            if node.embedding is None:
                 logger.warning(f"Node {node.node_id} has no embedding, skipping")
                 continue
+            
+            embedding = node.get_embedding()
 
             # Build tags
             tags = ["llamaindex_node"]
@@ -181,22 +183,25 @@ class AxonLlamaIndexVectorStore(BasePydanticVectorStore):
                 tags.append(f"node_type:{node.class_name()}")
 
             # Extract metadata
-            metadata = node.metadata or {}
-            custom_fields = {
+            metadata_dict = node.metadata or {}
+            # Build metadata dict with custom fields for store()
+            # Use get_node_info() instead of deprecated node_info property
+            node_info = node.get_node_info() if hasattr(node, "get_node_info") else {}
+            store_metadata = {
                 "node_id": node.node_id,
                 "ref_doc_id": node.ref_doc_id or "",
-                "node_info": node.node_info or {},
-                **metadata,
+                "node_info": node_info,
+                **metadata_dict,
             }
 
-            # Store in Axon
+            # Store in Axon - content as positional arg, metadata dict for custom fields
+            # Note: System will generate embeddings internally; we don't pass pre-computed embeddings
             entry_id = await self._system.store(
-                text=text,
-                embedding=embedding,
+                text,  # content as positional arg
+                metadata=store_metadata,  # metadata dict
                 tier=self._tier,
                 tags=tags,
                 importance=0.5,
-                custom_fields=custom_fields,
             )
 
             node_ids.append(entry_id)
@@ -303,24 +308,24 @@ class AxonLlamaIndexVectorStore(BasePydanticVectorStore):
         similarities = []
 
         for entry in results:
-            # Reconstruct node from entry
-            node_id = entry.metadata.custom_fields.get("node_id", entry.id)
-            ref_doc_id = entry.metadata.custom_fields.get("ref_doc_id", None)
+            # Reconstruct node from entry - access metadata fields directly
+            node_id = getattr(entry.metadata, "node_id", entry.id)
+            ref_doc_id = getattr(entry.metadata, "ref_doc_id", None)
 
-            # Create TextNode
+            # Extract custom metadata - iterate model_dump() excluding standard fields
+            metadata_dict = {}
+            for k, v in entry.metadata.model_dump().items():
+                if k not in ["node_id", "ref_doc_id", "node_info", "importance", "created_at", "last_accessed", "access_count", "tier"]:
+                    metadata_dict[k] = v
+
+            # Create TextNode with ref_doc_id during construction (it's read-only)
             node = TextNode(
                 id_=node_id,
                 text=entry.text,
                 embedding=entry.embedding,
-                metadata={
-                    k: v
-                    for k, v in entry.metadata.custom_fields.items()
-                    if k not in ["node_id", "ref_doc_id", "node_info"]
-                },
+                metadata=metadata_dict,
+                ref_doc_id=ref_doc_id,  # Pass during construction, not after
             )
-
-            if ref_doc_id:
-                node.ref_doc_id = ref_doc_id
 
             nodes.append(node)
             ids.append(node_id)

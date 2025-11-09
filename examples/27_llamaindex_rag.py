@@ -19,12 +19,22 @@ Run: python examples/27_llamaindex_rag.py
 
 import asyncio
 import os
+from pathlib import Path
+
+# Load environment variables from .env file if it exists
+try:
+    from dotenv import load_dotenv
+    env_path = Path(__file__).parent.parent / ".env"
+    if env_path.exists():
+        load_dotenv(env_path)
+except ImportError:
+    pass  # python-dotenv not installed
 
 # Set OpenAI API key (or use environment variable)
 # os.environ["OPENAI_API_KEY"] = "your-api-key-here"
 
 from axon import MemorySystem
-from axon.core.templates import balanced
+from axon.core.templates import DEVELOPMENT_CONFIG
 
 try:
     from llama_index.core import Document, VectorStoreIndex, StorageContext
@@ -52,7 +62,7 @@ async def demo_basic_rag():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create Axon vector store
     vectorstore = AxonLlamaIndexVectorStore(system, collection_name="knowledge_base")
@@ -123,7 +133,7 @@ async def demo_multi_collection():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create separate vector stores for different collections
     tech_store = AxonLlamaIndexVectorStore(system, collection_name="tech_docs")
@@ -194,7 +204,7 @@ async def demo_incremental_indexing():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create vector store
     vectorstore = AxonLlamaIndexVectorStore(system, collection_name="incremental_docs")
@@ -251,7 +261,7 @@ async def demo_with_custom_nodes():
     print()
 
     # Create Axon memory system
-    system = MemorySystem(balanced())
+    system = MemorySystem(DEVELOPMENT_CONFIG)
 
     # Create vector store
     vectorstore = AxonLlamaIndexVectorStore(system, collection_name="custom_nodes")

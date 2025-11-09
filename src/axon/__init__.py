@@ -23,6 +23,7 @@ Key Features:
 from typing import TYPE_CHECKING
 
 from .adapters import InMemoryAdapter, StorageAdapter
+from .core.memory_system import MemorySystem
 from .embedders import (
     Embedder,
     EmbeddingCache,
@@ -97,6 +98,8 @@ __version__ = "0.1.0"
 __all__ = [
     # Version
     "__version__",
+    # Core
+    "MemorySystem",
     # Models
     "MemoryEntry",
     "MemoryMetadata",
