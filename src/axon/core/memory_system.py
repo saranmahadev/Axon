@@ -626,8 +626,7 @@ class MemorySystem:
         # since get_adapter() is async
         if self._transaction_coordinator is None:
             self._transaction_coordinator = TransactionCoordinator(
-                adapters={},  # Will be populated on first use
-                isolation_level=isolation_level
+                adapters={}, isolation_level=isolation_level  # Will be populated on first use
             )
 
         return self._transaction_coordinator.transaction()
@@ -733,7 +732,7 @@ class MemorySystem:
                 )
             except Exception:
                 pass  # Will fall through to list_ids approach
-            
+
             # If query returned nothing (e.g., no embeddings), try listing all IDs
             if not entries:
                 try:

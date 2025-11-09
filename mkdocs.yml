@@ -1,0 +1,204 @@
+site_name: Axon Documentation
+site_description: Unified Memory SDK for LLM Applications
+site_author: Axon Team
+site_url: https://github.com/yourusername/Axon
+
+repo_name: Axon
+repo_url: https://github.com/yourusername/Axon
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  palette:
+    # Light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  features:
+    - navigation.instant        # Instant loading
+    - navigation.tracking       # URL tracking
+    - navigation.tabs           # Top-level tabs
+    - navigation.tabs.sticky    # Sticky tabs
+    - navigation.sections       # Section navigation
+    - navigation.expand         # Expand subsections
+    - navigation.path           # Breadcrumb navigation
+    - navigation.indexes        # Section index pages
+    - navigation.top            # Back to top button
+    - navigation.footer         # Footer navigation
+    - toc.follow                # TOC follows scroll
+    - search.suggest            # Search suggestions
+    - search.highlight          # Highlight search results
+    - search.share              # Share search results
+    - content.code.copy         # Copy code blocks
+    - content.code.annotate     # Code annotations
+    - content.tabs.link         # Linked content tabs
+
+  icon:
+    repo: fontawesome/brands/github
+    admonition:
+      note: fontawesome/solid/note-sticky
+      abstract: fontawesome/solid/book
+      info: fontawesome/solid/circle-info
+      tip: fontawesome/solid/bullhorn
+      success: fontawesome/solid/check
+      question: fontawesome/solid/circle-question
+      warning: fontawesome/solid/triangle-exclamation
+      failure: fontawesome/solid/bomb
+      danger: fontawesome/solid/skull
+      bug: fontawesome/solid/robot
+      example: fontawesome/solid/flask
+      quote: fontawesome/solid/quote-left
+
+plugins:
+  - search:
+      lang: en
+      separator: '[\s\-,:!=\[\]()"`/]+|\.(?!\d)|&[lg]t;|(?!\b)(?=[A-Z][a-z])'
+  - git-revision-date-localized:
+      enable_creation_date: true
+      type: timeago
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [src]
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_object_full_path: false
+            show_category_heading: true
+            show_if_no_docstring: false
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 100
+            merge_init_into_class: true
+            show_submodules: false
+
+markdown_extensions:
+  # Python Markdown
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      toc_depth: 4
+
+  # Python Markdown Extensions
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.betterem:
+      smart_enable: all
+  - pymdownx.caret
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.snippets:
+      check_paths: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.tilde
+
+extra:
+  version:
+    provider: mike
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourusername/Axon
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/axon/
+  analytics:
+    provider: google
+    property: !ENV GOOGLE_ANALYTICS_KEY
+
+extra_css:
+  - stylesheets/extra.css
+
+extra_javascript:
+  - javascripts/mathjax.js
+  - https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quickstart.md
+      - Configuration: getting-started/configuration.md
+  - Core Concepts:
+      - Overview: concepts/overview.md
+      - Memory Tiers: concepts/tiers.md
+      - Policies: concepts/policies.md
+      - Routing: concepts/routing.md
+      - Memory Lifecycle: concepts/lifecycle.md
+  - Storage Adapters:
+      - Overview: adapters/overview.md
+      - In-Memory: adapters/in-memory.md
+      - Redis: adapters/redis.md
+      - ChromaDB: adapters/chromadb.md
+      - Qdrant: adapters/qdrant.md
+      - Pinecone: adapters/pinecone.md
+      - Custom Adapters: adapters/custom.md
+  - Advanced Features:
+      - Audit Logging: advanced/audit.md
+      - Privacy & PII Detection: advanced/privacy.md
+      - Transactions (2PC): advanced/transactions.md
+      - Compaction Strategies: advanced/compaction.md
+      - Structured Logging: advanced/logging.md
+  - Integrations:
+      - LangChain: integrations/langchain.md
+      - LlamaIndex: integrations/llamaindex.md
+  - API Reference:
+      - MemorySystem: api/memory-system.md
+      - Models: api/models.md
+      - Adapters: api/adapters.md
+      - Policies: api/policies.md
+      - Router: api/router.md
+      - Embedders: api/embedders.md
+  - Deployment:
+      - Production Guide: deployment/production.md
+      - Performance Tuning: deployment/performance.md
+      - Monitoring: deployment/monitoring.md
+      - Security: deployment/security.md
+  - Examples:
+      - Basic Usage: examples/basic.md
+      - Multi-Tier: examples/multi-tier.md
+      - RAG Application: examples/rag.md
+      - Chatbot: examples/chatbot.md
+  - Contributing:
+      - Development Guide: contributing/development.md
+      - Testing: contributing/testing.md
+      - Code Style: contributing/style.md
+  - Changelog: changelog.md
