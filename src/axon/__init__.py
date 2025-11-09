@@ -60,6 +60,16 @@ from .core.logging_config import (
     log_performance,
 )
 
+from .core.compaction_strategies import (
+    CompactionStrategy,
+    SemanticCompactionStrategy,
+    ImportanceCompactionStrategy,
+    TimeBasedCompactionStrategy,
+    HybridCompactionStrategy,
+    CountCompactionStrategy,
+    get_strategy,
+)
+
 
 def __getattr__(name: str):
     """Lazy load heavy embedders to improve import time."""
@@ -117,4 +127,12 @@ __all__ = [
     "get_correlation_id",
     "clear_correlation_id",
     "log_performance",
+    # Compaction Strategies
+    "CompactionStrategy",
+    "SemanticCompactionStrategy",
+    "ImportanceCompactionStrategy",
+    "TimeBasedCompactionStrategy",
+    "HybridCompactionStrategy",
+    "CountCompactionStrategy",
+    "get_strategy",
 ]

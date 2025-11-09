@@ -35,10 +35,7 @@ class CompactionStrategy(ABC):
 
     @abstractmethod
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select which entries should be compacted.
 
@@ -54,10 +51,7 @@ class CompactionStrategy(ABC):
 
     @abstractmethod
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Group entries for batch summarization.
 
@@ -116,10 +110,7 @@ class SemanticCompactionStrategy(CompactionStrategy):
         self.min_cluster_size = min_cluster_size
 
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select entries with embeddings for semantic compaction.
 
@@ -150,18 +141,14 @@ class SemanticCompactionStrategy(CompactionStrategy):
 
         # Sort by importance (low first) and date (old first)
         sorted_entries = sorted(
-            entries_with_embeddings,
-            key=lambda e: (e.metadata.importance, e.metadata.created_at)
+            entries_with_embeddings, key=lambda e: (e.metadata.importance, e.metadata.created_at)
         )
 
         # Select bottom entries
         return sorted_entries[:entries_to_compact_count]
 
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Group entries by semantic similarity using clustering.
 
@@ -284,10 +271,7 @@ class ImportanceCompactionStrategy(CompactionStrategy):
         self.importance_threshold = importance_threshold
 
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select lowest-importance entries for compaction.
 
@@ -304,8 +288,7 @@ class ImportanceCompactionStrategy(CompactionStrategy):
 
         # Sort by importance (lowest first), then by date (oldest first)
         sorted_entries = sorted(
-            entries,
-            key=lambda e: (e.metadata.importance, e.metadata.created_at)
+            entries, key=lambda e: (e.metadata.importance, e.metadata.created_at)
         )
 
         # Calculate how many to compact
@@ -320,10 +303,7 @@ class ImportanceCompactionStrategy(CompactionStrategy):
         return selected
 
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Group entries by importance tier.
 
@@ -389,10 +369,7 @@ class TimeBasedCompactionStrategy(CompactionStrategy):
         self.age_threshold_days = age_threshold_days
 
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select entries older than threshold.
 
@@ -412,8 +389,7 @@ class TimeBasedCompactionStrategy(CompactionStrategy):
 
         # Filter old entries
         old_entries = [
-            e for e in entries
-            if e.metadata.created_at.replace(tzinfo=None) < cutoff_date
+            e for e in entries if e.metadata.created_at.replace(tzinfo=None) < cutoff_date
         ]
 
         if not old_entries:
@@ -432,10 +408,7 @@ class TimeBasedCompactionStrategy(CompactionStrategy):
         return sorted_old[:entries_to_compact_count]
 
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Group entries by time period.
 
@@ -493,11 +466,7 @@ class HybridCompactionStrategy(CompactionStrategy):
         ... )
     """
 
-    def __init__(
-        self,
-        strategies: list[CompactionStrategy],
-        weights: list[float] | None = None
-    ):
+    def __init__(self, strategies: list[CompactionStrategy], weights: list[float] | None = None):
         """Initialize hybrid strategy.
 
         Args:
@@ -525,10 +494,7 @@ class HybridCompactionStrategy(CompactionStrategy):
         self.weights = weights
 
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select entries using combined strategy scores.
 
@@ -560,9 +526,7 @@ class HybridCompactionStrategy(CompactionStrategy):
 
         # Sort by combined score (highest score = most strategies want to compact)
         sorted_entries = sorted(
-            entries,
-            key=lambda e: (entry_scores[e.id], -e.metadata.importance),
-            reverse=True
+            entries, key=lambda e: (entry_scores[e.id], -e.metadata.importance), reverse=True
         )
 
         # Select top entries
@@ -570,10 +534,7 @@ class HybridCompactionStrategy(CompactionStrategy):
         return sorted_entries[:entries_to_compact_count]
 
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Group entries using first strategy's grouping logic.
 
@@ -604,10 +565,7 @@ class CountCompactionStrategy(CompactionStrategy):
     """
 
     def select_entries_to_compact(
-        self,
-        entries: list[MemoryEntry],
-        threshold: int,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], threshold: int, **kwargs: Any
     ) -> list[MemoryEntry]:
         """Select bottom 50% of entries by importance."""
         if len(entries) <= threshold:
@@ -615,8 +573,7 @@ class CountCompactionStrategy(CompactionStrategy):
 
         # Sort by importance (low first) and date (old first)
         sorted_entries = sorted(
-            entries,
-            key=lambda e: (e.metadata.importance, e.metadata.created_at)
+            entries, key=lambda e: (e.metadata.importance, e.metadata.created_at)
         )
 
         # Compact to 80% of threshold
@@ -626,10 +583,7 @@ class CountCompactionStrategy(CompactionStrategy):
         return sorted_entries[:entries_to_compact_count]
 
     def group_entries(
-        self,
-        entries: list[MemoryEntry],
-        batch_size: int = 100,
-        **kwargs: Any
+        self, entries: list[MemoryEntry], batch_size: int = 100, **kwargs: Any
     ) -> list[list[MemoryEntry]]:
         """Simple batching."""
         groups = []

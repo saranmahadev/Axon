@@ -128,6 +128,70 @@ class StorageAdapter(ABC):
         """
         pass
 
+    # Optional transaction support methods
+    # Adapters that support transactions should override these
+
+    async def supports_transactions(self) -> bool:
+        """
+        Check if adapter supports transactions.
+
+        Returns:
+            True if adapter implements prepare/commit/abort, False otherwise
+        """
+        return False
+
+    async def prepare_transaction(self, transaction_id: str) -> bool:
+        """
+        Prepare for transaction commit (Phase 1 of 2PC).
+
+        This method should validate that all pending operations can be
+        committed and reserve necessary resources.
+
+        Args:
+            transaction_id: Unique transaction identifier
+
+        Returns:
+            True if ready to commit, False if cannot prepare
+
+        Raises:
+            NotImplementedError: If adapter doesn't support transactions
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support transactions")
+
+    async def commit_transaction(self, transaction_id: str) -> bool:
+        """
+        Commit transaction (Phase 2 of 2PC).
+
+        This method should apply all pending changes atomically.
+
+        Args:
+            transaction_id: Unique transaction identifier
+
+        Returns:
+            True if commit succeeded, False otherwise
+
+        Raises:
+            NotImplementedError: If adapter doesn't support transactions
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support transactions")
+
+    async def abort_transaction(self, transaction_id: str) -> bool:
+        """
+        Abort transaction and rollback changes.
+
+        This method should discard all pending changes for the transaction.
+
+        Args:
+            transaction_id: Unique transaction identifier
+
+        Returns:
+            True if abort succeeded, False otherwise
+
+        Raises:
+            NotImplementedError: If adapter doesn't support transactions
+        """
+        raise NotImplementedError(f"{self.__class__.__name__} does not support transactions")
+
     # Sync wrappers for convenience
     def save_sync(self, entry: MemoryEntry) -> str:
         """Synchronous wrapper for save()."""

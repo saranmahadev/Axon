@@ -22,6 +22,7 @@ from axon.core.policy_engine import PolicyEngine
 from axon.core.privacy import PIIDetector
 from axon.core.router import Router
 from axon.core.scoring import ScoringEngine
+from axon.core.transaction import IsolationLevel, TransactionCoordinator
 from axon.models.audit import EventStatus, OperationType
 from axon.models.entry import MemoryEntry, MemoryMetadata
 from axon.models.filter import Filter
@@ -184,6 +185,9 @@ class MemorySystem:
         self._trace_events: list[TraceEvent] = []
         self._enable_tracing = True
 
+        # Transaction coordinator
+        self._transaction_coordinator: TransactionCoordinator | None = None
+
     def _register_adapters_from_config(self):
         """Register adapters from configuration."""
         # Build tiers dict from config
@@ -338,7 +342,9 @@ class MemorySystem:
                     "tags": tags or [],
                     "tier": tier,
                     "has_embedding": entry.embedding is not None,
-                    "privacy_level": entry.metadata.privacy_level.value if entry.metadata.privacy_level else None,
+                    "privacy_level": (
+                        entry.metadata.privacy_level.value if entry.metadata.privacy_level else None
+                    ),
                 }
                 # Add PII detection info if available
                 if pii_result and pii_result.has_pii:
@@ -592,6 +598,45 @@ class MemorySystem:
             enabled: Whether to enable tracing
         """
         self._enable_tracing = enabled
+
+    def transaction(self, isolation_level: IsolationLevel = IsolationLevel.READ_COMMITTED):
+        """
+        Create a transactional context for atomic multi-tier operations.
+
+        This enables Two-Phase Commit (2PC) for operations that span multiple
+        tiers, ensuring either all changes succeed or all are rolled back.
+
+        Args:
+            isolation_level: Transaction isolation level
+
+        Returns:
+            Async context manager for the transaction
+
+        Example:
+            >>> async with system.transaction() as txn:
+            ...     await system.store("entry 1", tier="ephemeral")
+            ...     await system.store("entry 2", tier="persistent")
+            ...     # Commits automatically on exit, rolls back on exception
+
+        Raises:
+            RuntimeError: If transaction fails to prepare or commit
+        """
+        # Lazy initialize transaction coordinator
+        if self._transaction_coordinator is None:
+            adapters = {}
+            for tier_name in ["ephemeral", "session", "persistent"]:
+                try:
+                    adapter = self.registry.get_adapter(tier_name)
+                    adapters[tier_name] = adapter
+                except KeyError:
+                    # Tier not configured, skip
+                    pass
+
+            self._transaction_coordinator = TransactionCoordinator(
+                adapters=adapters, isolation_level=isolation_level
+            )
+
+        return self._transaction_coordinator.transaction()
 
     def get_statistics(self) -> dict[str, Any]:
         """
@@ -1184,7 +1229,7 @@ class MemorySystem:
     async def compact(
         self,
         tier: str | None = None,
-        strategy: str = "count",
+        strategy: str | Any = "count",
         threshold: int | None = None,
         dry_run: bool = False,
         summarizer: Any | None = None,
@@ -1199,19 +1244,22 @@ class MemorySystem:
 
         The compaction process:
         1. Check if tier needs compaction (via threshold)
-        2. Select entries to compact (low importance, older entries)
-        3. Group entries into batches
+        2. Select entries to compact using strategy
+        3. Group entries into batches using strategy
         4. Summarize each group using an LLM
         5. Replace original entries with summary entries
         6. Update provenance to track what was summarized
 
         Args:
             tier: Tier to compact (None = check all tiers and compact as needed)
-            strategy: Compaction strategy to use:
-                - "count": Compact when entry count exceeds threshold
-                - "semantic": Group by semantic similarity (future)
-                - "importance": Compact low-importance entries first (future)
-                - "time": Compact old entries (future)
+            strategy: Compaction strategy to use. Can be:
+                - String: "count", "semantic", "importance", "time", or "hybrid"
+                - CompactionStrategy instance for custom strategies
+                Strategy behaviors:
+                - "count": Legacy count-based compaction
+                - "semantic": Group by embedding similarity
+                - "importance": Compact low-importance entries first
+                - "time": Compact old entries first
             threshold: Entry count threshold override (None = use policy default)
             dry_run: If True, return what would be compacted without doing it
             summarizer: Summarizer instance to use (None = create default LLMSummarizer)
@@ -1247,6 +1295,20 @@ class MemorySystem:
             >>> print(f"Created {result['summaries_created']} summaries")
             >>> print(f"Reduction: {result['reduction_ratio']*100:.1f}%")
 
+            >>> # Semantic compaction with similarity clustering
+            >>> result = await memory_system.compact(
+            ...     tier="persistent",
+            ...     strategy="semantic"
+            ... )
+
+            >>> # Custom strategy instance
+            >>> from axon.core.compaction_strategies import SemanticCompactionStrategy
+            >>> custom_strategy = SemanticCompactionStrategy(similarity_threshold=0.9)
+            >>> result = await memory_system.compact(
+            ...     tier="persistent",
+            ...     strategy=custom_strategy
+            ... )
+
             >>> # Dry run to see what would happen
             >>> result = await memory_system.compact(tier="session", dry_run=True)
             >>> if result['entries_before'] > result['entries_after']:
@@ -1257,6 +1319,7 @@ class MemorySystem:
         """
         from ..models.base import MemoryEntryType, ProvenanceEvent
         from .summarizer import LLMSummarizer
+        from .compaction_strategies import CompactionStrategy, get_strategy
 
         start_time = datetime.now()
 
@@ -1264,18 +1327,19 @@ class MemorySystem:
         if embedder is None:
             embedder = self.embedder
 
-        # Validate strategy
-        valid_strategies = ["count", "semantic", "importance", "time"]
-        if strategy not in valid_strategies:
+        # Get strategy instance
+        if isinstance(strategy, str):
+            # Get strategy by name
+            strategy_instance = get_strategy(strategy)
+            strategy_name = strategy
+        elif isinstance(strategy, CompactionStrategy):
+            # Use custom strategy instance
+            strategy_instance = strategy
+            strategy_name = strategy_instance.name
+        else:
             raise ValueError(
-                f"Invalid compaction strategy: '{strategy}'. " f"Must be one of {valid_strategies}"
-            )
-
-        # Only count strategy is implemented for now
-        if strategy != "count":
-            raise ValueError(
-                f"Strategy '{strategy}' is not yet implemented. "
-                f"Currently only 'count' strategy is supported."
+                f"Invalid strategy type: {type(strategy)}. "
+                "Must be a string name or CompactionStrategy instance."
             )
 
         # Validate tier if specified
@@ -1310,7 +1374,7 @@ class MemorySystem:
                 "reduction_ratio": 0.0,
                 "dry_run": dry_run,
                 "execution_time": 0.0,
-                "strategy": strategy,
+                "strategy": strategy_name,
                 "reason": "No tiers need compaction (below threshold)",
             }
 
@@ -1325,7 +1389,7 @@ class MemorySystem:
                         result_count=0,
                         success=True,
                         metadata={
-                            "strategy": strategy,
+                            "strategy": strategy_name,
                             "tiers_checked": list(self.config.tiers.keys()),
                             "tiers_compacted": 0,
                             "dry_run": dry_run,
@@ -1371,35 +1435,30 @@ class MemorySystem:
                 total_after += current_count
                 continue
 
-            # Calculate how many entries to compact (compact bottom 50%)
-            target_count = int(tier_threshold * 0.8)  # Compact down to 80% of threshold
-            entries_to_compact_count = current_count - target_count
-
-            if entries_to_compact_count <= 0:
-                total_after += current_count
-                continue
-
             # Query all entries
             all_entries = await adapter.query(
                 vector=[0.0] * 1536, k=current_count, filter=None  # Dummy vector
             )
 
-            # Sort by importance (low first) and date (old first)
-            sorted_entries = sorted(
-                all_entries, key=lambda e: (e.metadata.importance, e.metadata.created_at)
+            if not all_entries:
+                total_after += current_count
+                continue
+
+            # Use strategy to select entries to compact
+            entries_to_compact = strategy_instance.select_entries_to_compact(
+                all_entries, threshold=tier_threshold
             )
 
-            # Select entries to compact (bottom entries)
-            entries_to_compact = sorted_entries[:entries_to_compact_count]
-            entries_to_keep = sorted_entries[entries_to_compact_count:]
+            if not entries_to_compact:
+                total_after += current_count
+                continue
 
-            # Group entries for summarization (batches of 100)
-            batch_size = 100
-            groups = []
-            for i in range(0, len(entries_to_compact), batch_size):
-                batch = entries_to_compact[i : i + batch_size]
-                if batch:  # Only add non-empty batches
-                    groups.append(batch)
+            # Determine entries to keep (those not selected for compaction)
+            entries_to_compact_ids = {e.id for e in entries_to_compact}
+            entries_to_keep = [e for e in all_entries if e.id not in entries_to_compact_ids]
+
+            # Use strategy to group entries for summarization
+            groups = strategy_instance.group_entries(entries_to_compact, batch_size=100)
 
             total_groups += len(groups)
 
@@ -1506,7 +1565,7 @@ class MemorySystem:
             "reduction_ratio": reduction_ratio,
             "dry_run": dry_run,
             "execution_time": execution_time,
-            "strategy": strategy,
+            "strategy": strategy_name,
         }
 
         # Create trace event
@@ -1521,7 +1580,7 @@ class MemorySystem:
                     success=True,
                     metadata={
                         "tiers_compacted": tiers_to_compact,
-                        "strategy": strategy,
+                        "strategy": strategy_name,
                         "threshold": threshold,
                         "dry_run": dry_run,
                         "summaries_created": total_summaries,
@@ -1537,7 +1596,7 @@ class MemorySystem:
                 metadata={
                     "tier": tier or "multiple",
                     "tiers_compacted": tiers_to_compact,
-                    "strategy": strategy,
+                    "strategy": strategy_name,
                     "threshold": threshold,
                     "entries_before": total_before,
                     "entries_after": total_after,
@@ -1681,7 +1740,9 @@ class MemorySystem:
                             if entry.metadata.provenance:
                                 for prov_event in entry.metadata.provenance:
                                     if "summarized_ids" in prov_event.metadata:
-                                        source_ids = prov_event.metadata["summarized_ids"].split(",")
+                                        source_ids = prov_event.metadata["summarized_ids"].split(
+                                            ","
+                                        )
                                         source_ids = [sid.strip() for sid in source_ids]
 
                                         if entry_id in source_ids:
@@ -1735,7 +1796,9 @@ class MemorySystem:
             ```
         """
         if not self.audit_logger:
-            raise RuntimeError("No audit logger configured. Initialize MemorySystem with audit_logger parameter.")
+            raise RuntimeError(
+                "No audit logger configured. Initialize MemorySystem with audit_logger parameter."
+            )
 
         events = await self.audit_logger.get_events(
             operation=operation,
