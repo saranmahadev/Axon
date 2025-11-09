@@ -622,18 +622,12 @@ class MemorySystem:
             RuntimeError: If transaction fails to prepare or commit
         """
         # Lazy initialize transaction coordinator
+        # Note: We'll collect adapters when the context manager is entered,
+        # since get_adapter() is async
         if self._transaction_coordinator is None:
-            adapters = {}
-            for tier_name in ["ephemeral", "session", "persistent"]:
-                try:
-                    adapter = self.registry.get_adapter(tier_name)
-                    adapters[tier_name] = adapter
-                except KeyError:
-                    # Tier not configured, skip
-                    pass
-
             self._transaction_coordinator = TransactionCoordinator(
-                adapters=adapters, isolation_level=isolation_level
+                adapters={},  # Will be populated on first use
+                isolation_level=isolation_level
             )
 
         return self._transaction_coordinator.transaction()
@@ -726,10 +720,11 @@ class MemorySystem:
         stats_by_tier = {}
 
         for tier_name in tiers_to_export:
-            adapter = self.registry.get_adapter(tier_name)
+            adapter = await self.registry.get_adapter(tier_name)
 
             # Query all entries from this tier
-            # Use a broad query to get everything
+            # Try query first, but if it returns nothing, fall back to listing all IDs
+            entries = []
             try:
                 entries = await adapter.query(
                     vector=[0.0] * 384,  # Dummy vector - InMemory falls back to text search
@@ -737,17 +732,23 @@ class MemorySystem:
                     filter=filter,
                 )
             except Exception:
-                # If query fails, try to list all IDs and fetch
-                entry_ids = await adapter.list_ids()
-                entries = []
-                for entry_id in entry_ids:
-                    try:
-                        entry = await adapter.get(entry_id)
-                        # Apply filter if provided
-                        if filter is None or filter.matches(entry):
-                            entries.append(entry)
-                    except KeyError:
-                        continue
+                pass  # Will fall through to list_ids approach
+            
+            # If query returned nothing (e.g., no embeddings), try listing all IDs
+            if not entries:
+                try:
+                    entry_ids = adapter.list_ids()  # Note: list_ids is sync, not async
+                    for entry_id in entry_ids:
+                        try:
+                            entry = await adapter.get(entry_id)
+                            # Apply filter if provided
+                            if filter is None or filter.matches(entry):
+                                entries.append(entry)
+                        except KeyError:
+                            continue
+                except Exception:
+                    # If list_ids also fails, just use empty list
+                    pass
 
             stats_by_tier[tier_name] = len(entries)
 
@@ -925,7 +926,7 @@ class MemorySystem:
                     continue
 
                 # Check if entry already exists
-                adapter = self.registry.get_adapter(target_tier)
+                adapter = await self.registry.get_adapter(target_tier)
                 entry_id = entry_data["id"]
 
                 exists = False
@@ -1092,8 +1093,8 @@ class MemorySystem:
             )
 
         # Get adapters
-        source_adapter = self.registry.get_adapter(source_tier)
-        target_adapter = self.registry.get_adapter(target_tier)
+        source_adapter = await self.registry.get_adapter(source_tier)
+        target_adapter = await self.registry.get_adapter(target_tier)
 
         # Track statistics
         synced = 0
@@ -1399,8 +1400,8 @@ class MemorySystem:
 
             return result
 
-        # Initialize summarizer if not provided
-        if summarizer is None:
+        # Initialize summarizer if not provided (skip for dry run since we won't actually summarize)
+        if summarizer is None and not dry_run:
             summarizer = LLMSummarizer()
 
         # Compact each tier
