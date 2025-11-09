@@ -29,13 +29,13 @@ import logging
 from typing import Any, Dict, List, Optional
 
 try:
-    from langchain_core.memory import BaseMemory
+    from langchain_core.chat_history import BaseChatMessageHistory
     from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
-    BaseMemory = object  # type: ignore
+    BaseChatMessageHistory = object  # type: ignore
     BaseMessage = object  # type: ignore
     HumanMessage = object  # type: ignore
     AIMessage = object  # type: ignore
@@ -46,7 +46,7 @@ from ...models import Filter
 logger = logging.getLogger(__name__)
 
 
-class AxonChatMemory(BaseMemory):
+class AxonChatMemory(BaseChatMessageHistory):
     """
     LangChain-compatible chat memory backed by Axon MemorySystem.
 
@@ -133,53 +133,29 @@ class AxonChatMemory(BaseMemory):
         )
 
     @property
-    def memory_variables(self) -> List[str]:
-        """Return the memory key."""
-        return [self.memory_key]
-
-    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+    def messages(self) -> List:
         """
-        Load conversation history from Axon memory.
-
-        Args:
-            inputs: Dictionary of input variables (used for semantic search if enabled)
-
+        Retrieve all messages for this session.
+        
         Returns:
-            Dictionary with memory_key mapped to conversation history
-
-        Raises:
-            RuntimeError: If async recall operation fails
+            List of chat messages
         """
         import asyncio
-
+        
         try:
-            # Run async recall in sync context
             loop = asyncio.get_event_loop()
             if loop.is_running():
-                # If already in async context, create new loop
                 import nest_asyncio
-
                 nest_asyncio.apply()
-
-            messages = loop.run_until_complete(self._load_messages_async(inputs))
-
+            
+            return loop.run_until_complete(self._get_messages_async())
         except Exception as e:
-            logger.error(f"Failed to load memory variables: {e}")
-            messages = []
-
-        if self.return_messages:
-            return {self.memory_key: messages}
-        else:
-            # Convert messages to string format
-            buffer = self._messages_to_string(messages)
-            return {self.memory_key: buffer}
-
-    async def _load_messages_async(self, inputs: Dict[str, Any]) -> List[BaseMessage]:
+            logger.error(f"Failed to get messages: {e}")
+            return []
+    
+    async def _get_messages_async(self) -> List:
         """
         Async implementation of message loading.
-
-        Args:
-            inputs: Input dictionary (may contain query for semantic search)
 
         Returns:
             List of chat messages
@@ -194,20 +170,15 @@ class AxonChatMemory(BaseMemory):
 
         msg_filter = Filter(**filter_dict) if filter_dict else None
 
-        if self.use_semantic_search and self.input_key in inputs:
-            # Semantic recall based on current input
-            query_text = inputs[self.input_key]
-            results = await self.system.recall(query_text, k=self.k_messages, filter=msg_filter)
-        else:
-            # Retrieve recent messages chronologically
-            # Note: This requires Axon to support chronological retrieval
-            # For now, we use recall with empty query and rely on recency scoring
-            results = await self.system.recall("", k=self.k_messages, filter=msg_filter)
+        # Retrieve recent messages chronologically
+        # Use "chat_message" as query to match the tag (InMemoryAdapter needs non-empty query)
+        results = await self.system.recall("chat_message", k=self.k_messages, filter=msg_filter)
 
         # Convert MemoryEntry to LangChain messages
         messages = []
         for entry in results:
-            msg_type = entry.metadata.custom_fields.get("message_type", "human")
+            # message_type is stored directly on metadata (extra fields are allowed)
+            msg_type = getattr(entry.metadata, "message_type", "human")
             if msg_type == "ai":
                 messages.append(AIMessage(content=entry.text))
             else:
@@ -215,13 +186,12 @@ class AxonChatMemory(BaseMemory):
 
         return messages
 
-    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+    def add_messages(self, messages: List) -> None:
         """
-        Save chat exchange to Axon memory.
+        Add messages to the chat history.
 
         Args:
-            inputs: Dictionary containing user input (key: input_key)
-            outputs: Dictionary containing AI output (key: output_key)
+            messages: List of BaseMessage objects to add
 
         Raises:
             RuntimeError: If async store operation fails
@@ -232,48 +202,36 @@ class AxonChatMemory(BaseMemory):
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 import nest_asyncio
-
                 nest_asyncio.apply()
 
-            loop.run_until_complete(self._save_context_async(inputs, outputs))
+            loop.run_until_complete(self._add_messages_async(messages))
 
         except Exception as e:
-            logger.error(f"Failed to save context: {e}")
+            logger.error(f"Failed to add messages: {e}")
 
-    async def _save_context_async(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+    async def _add_messages_async(self, messages: List) -> None:
         """
-        Async implementation of context saving.
+        Async implementation of adding messages.
 
         Args:
-            inputs: User input dictionary
-            outputs: AI output dictionary
+            messages: List of BaseMessage objects
         """
-        # Extract input and output text
-        input_text = inputs.get(self.input_key, "")
-        output_text = outputs.get(self.output_key, "")
+        for msg in messages:
+            msg_type = "ai" if isinstance(msg, AIMessage) else "human"
+            
+            # Build metadata including session_id and message_type
+            metadata = {"message_type": msg_type}
+            if self.session_id:
+                metadata["session_id"] = self.session_id
+            
+            await self.system.store(
+                msg.content,
+                metadata=metadata,
+                tags=["chat_message"],
+                importance=0.5,
+            )
 
-        # Store user message
-        await self.system.store(
-            input_text,
-            session_id=self.session_id,
-            tags=["chat_message"],
-            importance=0.5,
-            custom_fields={"message_type": "human"},
-        )
-
-        # Store AI message
-        await self.system.store(
-            output_text,
-            session_id=self.session_id,
-            tags=["chat_message"],
-            importance=0.5,
-            custom_fields={"message_type": "ai"},
-        )
-
-        logger.debug(
-            f"Saved chat exchange to session {self.session_id}: "
-            f"input_len={len(input_text)}, output_len={len(output_text)}"
-        )
+        logger.debug(f"Added {len(messages)} messages to session {self.session_id}")
 
     def clear(self) -> None:
         """
@@ -282,14 +240,18 @@ class AxonChatMemory(BaseMemory):
         Note: This requires Axon to support filtering by session_id for deletion.
         Currently, this will log a warning as Axon doesn't have bulk delete by filter.
         """
-        logger.warning(
+        import warnings
+        
+        msg = (
             "AxonChatMemory.clear() is not fully supported. "
             "Axon does not currently support bulk delete by filter. "
             "Consider using a new session_id instead."
         )
+        logger.warning(msg)
+        warnings.warn(msg, UserWarning, stacklevel=2)
         # TODO: Implement when Axon supports bulk delete by filter
 
-    def _messages_to_string(self, messages: List[BaseMessage]) -> str:
+    def _messages_to_string(self, messages: List) -> str:
         """
         Convert message objects to string format.
 
@@ -310,10 +272,75 @@ class AxonChatMemory(BaseMemory):
 
         return "\n".join(lines)
 
-    # Async versions (optional but recommended)
+    # Backward compatibility methods for old BaseMemory API
+    @property
+    def memory_variables(self) -> List[str]:
+        """Return the memory key (for backward compatibility with BaseMemory API)."""
+        return [self.memory_key]
+
+    def load_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Load conversation history from Axon memory (backward compatibility method).
+
+        Args:
+            inputs: Dictionary of input variables
+
+        Returns:
+            Dictionary with memory_key mapped to conversation history
+        """
+        messages = self.messages
+        
+        if self.return_messages:
+            return {self.memory_key: messages}
+        else:
+            buffer = self._messages_to_string(messages)
+            return {self.memory_key: buffer}
+
+    def save_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+        """
+        Save chat exchange to Axon memory (backward compatibility method).
+
+        Args:
+            inputs: Dictionary containing user input (key: input_key)
+            outputs: Dictionary containing AI output (key: output_key)
+        """
+        # Extract input and output text
+        input_text = inputs.get(self.input_key, "")
+        output_text = outputs.get(self.output_key, "")
+
+        # Create message objects
+        messages = [
+            HumanMessage(content=input_text),
+            AIMessage(content=output_text)
+        ]
+        
+        # Use the new API
+        self.add_messages(messages)
+
+    async def asave_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+        """
+        Async version of save_context (backward compatibility method).
+
+        Args:
+            inputs: User input dictionary
+            outputs: AI output dictionary
+        """
+        # Extract input and output text
+        input_text = inputs.get(self.input_key, "")
+        output_text = outputs.get(self.output_key, "")
+
+        # Create message objects
+        messages = [
+            HumanMessage(content=input_text),
+            AIMessage(content=output_text)
+        ]
+        
+        # Use the async implementation
+        await self._add_messages_async(messages)
+
     async def aload_memory_variables(self, inputs: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Async version of load_memory_variables.
+        Async version of load_memory_variables (backward compatibility method).
 
         Args:
             inputs: Input dictionary
@@ -321,24 +348,15 @@ class AxonChatMemory(BaseMemory):
         Returns:
             Dictionary with memory variables
         """
-        messages = await self._load_messages_async(inputs)
-
+        messages = await self._get_messages_async()
+        
         if self.return_messages:
             return {self.memory_key: messages}
         else:
             buffer = self._messages_to_string(messages)
             return {self.memory_key: buffer}
 
-    async def asave_context(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
-        """
-        Async version of save_context.
-
-        Args:
-            inputs: User input dictionary
-            outputs: AI output dictionary
-        """
-        await self._save_context_async(inputs, outputs)
-
-    async def aclear(self) -> None:
-        """Async version of clear."""
-        self.clear()  # Same limitation as sync version
+    # For tests that use the internal async method
+    async def _save_context_async(self, inputs: Dict[str, Any], outputs: Dict[str, str]) -> None:
+        """Internal async method for saving context (for backward compatibility with tests)."""
+        await self.asave_context(inputs, outputs)

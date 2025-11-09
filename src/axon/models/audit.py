@@ -10,7 +10,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OperationType(str, Enum):
@@ -60,13 +60,9 @@ class AuditEvent(BaseModel):
     error_message: Optional[str] = None
     duration_ms: Optional[float] = None
 
-    class Config:
-        """Pydantic configuration."""
-
-        json_encoders = {
-            datetime: lambda v: v.isoformat(),
-            UUID: lambda v: str(v),
-        }
+    # Pydantic v2 handles datetime and UUID serialization automatically
+    # Custom serialization is handled in to_dict() method below
+    model_config = ConfigDict()
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert audit event to dictionary with proper serialization.

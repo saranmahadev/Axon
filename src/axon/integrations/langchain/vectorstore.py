@@ -191,15 +191,15 @@ class AxonVectorStore(VectorStore):
                 **{k: v for k, v in metadata.items() if k not in ["source", "page"]},
             }
 
-            # Store entry
+            # Store entry (first arg is content, custom_fields go in metadata)
             entry_id = await self.system.store(
-                text=text,
-                embedding=embedding,
+                text,  # content parameter (positional)
+                metadata=custom_fields,  # custom fields as metadata
                 tier=self.tier,
                 tags=tags,
                 importance=0.5,
-                custom_fields=custom_fields,
             )
+            # Note: embedding is generated automatically by the system's embedder
 
             entry_ids.append(entry_id)
 
@@ -277,13 +277,21 @@ class AxonVectorStore(VectorStore):
         # Convert MemoryEntry to Document
         documents = []
         for entry in results:
-            # Extract metadata from custom fields
+            # Build metadata dict from entry metadata
+            # Start with standard fields
             metadata = {
                 "id": entry.id,
                 "importance": entry.metadata.importance,
-                "timestamp": entry.metadata.timestamp.isoformat(),
-                **entry.metadata.custom_fields,
+                "timestamp": entry.metadata.created_at.isoformat(),
             }
+            
+            # Add custom fields (stored as attributes on metadata due to extra="allow")
+            # Get all non-standard fields
+            for key, value in entry.metadata.model_dump().items():
+                if key not in ["user_id", "session_id", "source", "privacy_level", 
+                               "created_at", "last_accessed_at", "tags", "importance",
+                               "version", "provenance"]:
+                    metadata[key] = value
 
             doc = Document(page_content=entry.text, metadata=metadata)
             documents.append(doc)
@@ -360,12 +368,19 @@ class AxonVectorStore(VectorStore):
         # Note: Using importance as score proxy since Axon doesn't return similarity scores
         doc_score_pairs = []
         for entry in results:
+            # Build metadata dict from entry metadata
             metadata = {
                 "id": entry.id,
                 "importance": entry.metadata.importance,
-                "timestamp": entry.metadata.timestamp.isoformat(),
-                **entry.metadata.custom_fields,
+                "timestamp": entry.metadata.created_at.isoformat(),
             }
+            
+            # Add custom fields (stored as attributes on metadata due to extra="allow")
+            for key, value in entry.metadata.model_dump().items():
+                if key not in ["user_id", "session_id", "source", "privacy_level",
+                               "created_at", "last_accessed_at", "tags", "importance",
+                               "version", "provenance"]:
+                    metadata[key] = value
 
             doc = Document(page_content=entry.text, metadata=metadata)
             score = entry.metadata.importance  # Use importance as score proxy
