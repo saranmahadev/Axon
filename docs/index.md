@@ -4,10 +4,12 @@
 
 **Unified Memory SDK for LLM Applications**
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.0.0--beta2-orange.svg)](https://github.com/saranmahadev/Axon)
-[![PyPI](https://img.shields.io/badge/pypi-axon--sdk-blue.svg)](https://pypi.org/project/axon-sdk/)
+<p>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10+-blue.svg" alt="Python"></a>
+  <a href="https://github.com/saranmahadev/Axon"><img src="https://img.shields.io/badge/version-1.0.0--beta2-orange.svg" alt="Version"></a>
+  <a href="https://pypi.org/project/axon-sdk/"><img src="https://img.shields.io/badge/pypi-axon--sdk-blue.svg" alt="PyPI"></a>
+</p>
 
 </div>
 
