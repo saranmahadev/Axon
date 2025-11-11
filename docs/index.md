@@ -1,8 +1,8 @@
-# Axon
+# Axon - Unified Memory SDK for LLM Applications
 
 <div align="center">
 
-**Unified Memory SDK for LLM Applications**
+
 
 <p>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
@@ -131,7 +131,7 @@ graph TB
 === "Development"
 
     ```bash
-    git clone https://github.com/yourusername/Axon.git
+    git clone https://github.com/saranmahadev/Axon.git
     cd Axon
     pip install -e ".[dev]"
     ```
@@ -267,12 +267,12 @@ events = await system.export_audit_log(operation=OperationType.STORE)
 
 ## Community & Support
 
-- **GitHub**: [Report Issues](https://github.com/yourusername/Axon/issues)
-- **Discussions**: [Join the Community](https://github.com/yourusername/Axon/discussions)
-- **Examples**: [Browse Examples](https://github.com/yourusername/Axon/tree/main/examples)
+- **GitHub**: [Report Issues](https://github.com/saranmahadev/Axon/issues)
+- **Discussions**: [Join the Community](https://github.com/saranmahadev/Axon/discussions)
+- **Examples**: [Browse Examples](https://github.com/saranmahadev/Axon/tree/main/examples)
 
 ---
 
 ## License
 
-Axon is released under the [MIT License](https://github.com/yourusername/Axon/blob/main/LICENSE).
+Axon is released under the [MIT License](https://github.com/saranmahadev/Axon/blob/main/LICENSE).
