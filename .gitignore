@@ -74,3 +74,4 @@ demo_knowledge_db/
 qdrant_storage/
 chroma_db/
 nul
+site/

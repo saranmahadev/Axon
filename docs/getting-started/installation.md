@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- **Python**: 3.9 or higher
+- **Python**: 3.10 or higher
 - **Operating System**: Windows, macOS, Linux
 - **Optional**: Docker (for running backend services like Redis, Qdrant)
 
@@ -12,57 +12,58 @@
 
 ### Using pip (Recommended)
 
-=== "Minimal Installation"
+=== "Basic Installation"
 
-    Install Axon with core dependencies only:
+    Install Axon SDK with core dependencies:
 
     ```bash
-    pip install axon
+    pip install axon-sdk
     ```
 
     This includes:
 
-    - Core memory system
-    - In-memory adapter
-    - Basic embedders
+    - Core memory system (`MemorySystem`, `MemoryEntry`, etc.)
+    - In-memory adapter (for development and testing)
+    - OpenAI embedder support
+    - NumPy for vector operations
+    - Pydantic for data validation
 
 === "Full Installation"
 
-    Install with all storage adapters and embedders:
+    Install with all storage adapters and optional dependencies:
 
     ```bash
-    pip install "axon[all]"
+    pip install "axon-sdk[all]"
     ```
 
-    This includes:
+    This adds:
 
-    - All core features
-    - ChromaDB, Qdrant, Pinecone, Redis adapters
-    - OpenAI, HuggingFace, Voyage AI embedders
-    - LangChain and LlamaIndex integrations
+    - **Storage Adapters**: ChromaDB, Qdrant, Pinecone, Redis
+    - All vector database clients
+    - Additional backend dependencies
 
-=== "Custom Installation"
+=== "Development Installation"
 
-    Install only the adapters you need:
+    Install with development tools (testing, linting, type checking):
 
     ```bash
-    # Install with specific adapters
-    pip install "axon[chromadb,redis]"
-
-    # Install with specific integrations
-    pip install "axon[langchain,llamaindex]"
-
-    # Combine multiple extras
-    pip install "axon[qdrant,openai,langchain]"
+    pip install "axon-sdk[dev]"
     ```
+
+    This adds:
+
+    - pytest, pytest-cov, pytest-asyncio (testing)
+    - black (code formatting)
+    - ruff (linting)
+    - mypy (type checking)
 
 ### From Source
 
-For development or the latest features:
+For development or to get the latest features:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/Axon.git
+git clone https://github.com/saranmahadev/Axon.git
 cd Axon
 
 # Create virtual environment
@@ -80,32 +81,41 @@ pip install -e ".[dev]"
 
 ---
 
-## Optional Dependencies
+## Additional Dependencies
 
 ### Storage Backends
 
+Axon core includes the in-memory adapter by default. For production use, install additional storage backends:
+
 | Backend | Install Command | Use Case |
 |---------|----------------|----------|
-| **Redis** | `pip install "axon[redis]"` | Ephemeral/session caching with TTL |
-| **ChromaDB** | `pip install "axon[chromadb]"` | Local vector storage, development |
-| **Qdrant** | `pip install "axon[qdrant]"` | Production vector database |
-| **Pinecone** | `pip install "axon[pinecone]"` | Managed vector database |
+| **Redis** | `pip install redis>=5.0.0` | Ephemeral/session caching with TTL support |
+| **ChromaDB** | `pip install chromadb>=0.4.0` | Local vector storage, good for development |
+| **Qdrant** | `pip install qdrant-client>=1.6.0` | Production-grade vector database |
+| **Pinecone** | `pip install pinecone-client>=2.0.0` | Managed cloud vector database |
+
+**Or install all at once:**
+```bash
+pip install "axon-sdk[all]"
+```
 
 ### Embedders
 
+OpenAI embedder is included with core dependencies. For other providers:
+
 | Provider | Install Command | Models |
 |----------|----------------|--------|
-| **OpenAI** | `pip install "axon[openai]"` | text-embedding-3-small/large |
-| **Voyage AI** | `pip install "axon[voyageai]"` | voyage-2, voyage-code-2 |
-| **HuggingFace** | `pip install "axon[huggingface]"` | Any HF embedding model |
-| **Sentence Transformers** | `pip install "axon[sentence-transformers]"` | Local embeddings |
+| **OpenAI** | Included by default | text-embedding-3-small, text-embedding-3-large, ada-002 |
+| **Voyage AI** | `pip install voyageai` | voyage-2, voyage-code-2, voyage-law-2 |
+| **HuggingFace** | `pip install transformers sentence-transformers` | Any HuggingFace embedding model |
+| **Sentence Transformers** | `pip install sentence-transformers` | Local SBERT models |
 
 ### Integrations
 
 | Framework | Install Command | Description |
 |-----------|----------------|-------------|
-| **LangChain** | `pip install "axon[langchain]"` | Memory and VectorStore adapters |
-| **LlamaIndex** | `pip install "axon[llamaindex]"` | VectorStore integration |
+| **LangChain** | `pip install langchain langchain-community` | Memory and retriever adapters |
+| **LlamaIndex** | `pip install llama-index` | VectorStore integration |
 
 ---
 
@@ -114,22 +124,36 @@ pip install -e ".[dev]"
 After installation, verify Axon is working:
 
 ```python
-import axon
-print(f"Axon version: {axon.__version__}")
-
+import asyncio
 from axon import MemorySystem
 from axon.core.templates import DEVELOPMENT_CONFIG
 
-# Create a simple memory system
-system = MemorySystem(config=DEVELOPMENT_CONFIG)
-print("Axon installed successfully!")
+async def verify_installation():
+    """Verify Axon is installed and working."""
+    # Create a memory system
+    memory = MemorySystem(DEVELOPMENT_CONFIG)
+    
+    # Store a test memory
+    entry_id = await memory.store("Hello, Axon!")
+    
+    # Recall the memory
+    results = await memory.recall("Axon", k=1)
+    
+    if results and results[0].text == "Hello, Axon!":
+        print("✓ Axon installed successfully!")
+        print(f"✓ Memory stored and recalled correctly")
+        return True
+    return False
+
+# Run verification
+asyncio.run(verify_installation())
 ```
 
 Expected output:
 
 ```
-Axon version: 1.0.0-beta
-Axon installed successfully!
+✓ Axon installed successfully!
+✓ Memory stored and recalled correctly
 ```
 
 ---
@@ -255,10 +279,16 @@ Or use Qdrant Cloud (managed).
 
 **Problem**: `ModuleNotFoundError: No module named 'chromadb'`
 
-**Solution**: Install the required adapter:
+**Solution**: Install the required backend separately:
 
 ```bash
-pip install "axon[chromadb]"
+pip install chromadb>=0.4.0
+```
+
+Or install all backends at once:
+
+```bash
+pip install "axon-sdk[all]"
 ```
 
 ### Version Conflicts
@@ -270,24 +300,26 @@ pip install "axon[chromadb]"
 ```bash
 python -m venv venv
 source venv/bin/activate  # or .\venv\Scripts\activate on Windows
-pip install "axon[all]"
+pip install axon-sdk
 ```
 
-### Slow Imports
+### Python Version
 
-**Problem**: Importing Axon takes a long time
+**Problem**: `requires python>=3.10`
 
-**Solution**: Axon uses lazy imports. Only install what you need:
+**Solution**: Upgrade your Python version. Axon requires Python 3.10 or higher:
 
 ```bash
-# Instead of axon[all]
-pip install "axon[chromadb,openai]"  # Only what you use
+python --version  # Check your version
 ```
+
+Download Python 3.10+ from [python.org](https://www.python.org/downloads/)
 
 ---
 
 ## Getting Help
 
-- **Documentation**: [https://axon.readthedocs.io](https://axon.readthedocs.io)
-- **GitHub Issues**: [Report a bug](https://github.com/yourusername/Axon/issues)
-- **Discussions**: [Ask questions](https://github.com/yourusername/Axon/discussions)
+- **Documentation**: [http://axon.saranmahadev.in](http://axon.saranmahadev.in)
+- **GitHub Issues**: [Report a bug](https://github.com/saranmahadev/Axon/issues)
+- **Discussions**: [Ask questions](https://github.com/saranmahadev/Axon/discussions)
+- **PyPI Package**: [axon-sdk](https://pypi.org/project/axon-sdk/)

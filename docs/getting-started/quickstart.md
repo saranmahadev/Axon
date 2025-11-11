@@ -1,512 +1,437 @@
 # Quick Start
 
-Get started with Axon in under 5 minutes! This guide will walk you through the basics of storing, recalling, and managing memories.
+Get started with Axon in under 5 minutes! This guide walks you through the essentials of building your first memory-enabled application.
 
 ---
 
-## Your First Memory System
+## Prerequisites
 
-### Step 1: Install Axon
+Before starting, make sure you have:
 
-```bash
-pip install axon
-```
+- Python 3.10 or higher installed
+- Axon SDK installed (`pip install axon-sdk`)
 
-### Step 2: Create a Memory System
+---
+
+## Hello World
+
+Let's create your first memory system and store your first memory.
+
+### Complete Example
 
 ```python
+"""Your first Axon application."""
 import asyncio
 from axon import MemorySystem
-from axon.core.templates import balanced
+from axon.core.templates import DEVELOPMENT_CONFIG
 
-# Create memory system with balanced configuration
-system = MemorySystem(config=balanced())
-```
 
-### Step 3: Store Memories
-
-```python
 async def main():
-    # Store a memory with importance score
-    entry_id = await system.store(
-        "User prefers dark mode for the UI",
-        importance=0.8,
-        tags=["preference", "ui"]
-    )
-    print(f"Stored memory: {entry_id}")
+    """Store and recall your first memory."""
+    print("=== Axon Hello World ===\n")
+    
+    # Step 1: Create memory system
+    print("1. Creating memory system...")
+    memory = MemorySystem(DEVELOPMENT_CONFIG)
+    print("   OK Memory system created\n")
+    
+    # Step 2: Store a memory
+    print("2. Storing a memory...")
+    entry_id = await memory.store("Hello, Axon! This is my first memory.")
+    print(f"   OK Memory stored with ID: {entry_id}\n")
+    
+    # Step 3: Recall the memory
+    print("3. Recalling memories about 'hello'...")
+    results = await memory.recall("hello", k=1)
+    print(f"   OK Found {len(results)} result(s)\n")
+    
+    # Step 4: Display the result
+    if results:
+        print("4. Retrieved memory:")
+        print(f"   Content: {results[0].text}")
+        print(f"   ID: {results[0].id}")
+    
+    print("\n* Success! You've stored and recalled your first memory with Axon.")
 
-    # Store more memories
-    await system.store(
-        "Meeting scheduled for 3 PM tomorrow",
-        importance=0.6,
-        tags=["calendar", "todo"]
-    )
 
-    await system.store(
-        "Temporary note: check email",
-        importance=0.2,  # Low importance -> ephemeral tier
-        tags=["temporary"]
-    )
-
-# Run the async function
-asyncio.run(main())
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
-### Step 4: Recall Memories
+**Output:**
+```
+=== Axon Hello World ===
+
+1. Creating memory system...
+   OK Memory system created
+
+2. Storing a memory...
+   OK Memory stored with ID: a1b2c3d4-5678-90ab-cdef-1234567890ab
+
+3. Recalling memories about 'hello'...
+   OK Found 1 result(s)
+
+4. Retrieved memory:
+   Content: Hello, Axon! This is my first memory.
+   ID: a1b2c3d4-5678-90ab-cdef-1234567890ab
+
+* Success! You've stored and recalled your first memory with Axon.
+```
+
+!!! info "Why async?"
+    Axon uses async/await for all I/O operations to ensure high performance and scalability. All memory operations must be awaited.
+
+---
+
+## Core Operations
+
+### Storing Memories
+
+Axon provides flexible ways to store memories with metadata, importance scores, and tags.
+
+#### Basic Store
 
 ```python
-async def recall_example():
-    # Semantic search across all tiers
-    results = await system.recall(
-        "What are the user's UI preferences?",
-        k=5  # Return top 5 results
-    )
-
-    for entry in results:
-        print(f"Score: {entry.metadata.importance:.2f}")
-        print(f"Text: {entry.text}")
-        print(f"Tags: {entry.metadata.tags}")
-        print("---")
-
-asyncio.run(recall_example())
+# Simple text storage
+entry_id = await memory.store("The user's favorite color is blue.")
 ```
 
-**Output**:
+#### Store with Importance
 
-```
-Score: 0.80
-Text: User prefers dark mode for the UI
-Tags: ['preference', 'ui']
----
-```
-
----
-
-## Understanding Tiers
-
-Axon automatically routes memories to different tiers based on importance:
+Importance scores (0.0 to 1.0) determine which tier stores the memory:
 
 ```python
-async def tier_example():
-    # Low importance -> Ephemeral tier (short-lived)
-    await system.store("Temporary calculation result: 42", importance=0.1)
+# High importance → Persistent tier (long-term storage)
+await memory.store(
+    "User's email: user@example.com",
+    importance=0.9
+)
 
-    # Medium importance -> Session tier (session-scoped)
-    await system.store("User browsing history page 5", importance=0.5)
+# Medium importance → Session tier (session-scoped)
+await memory.store(
+    "User viewed product page",
+    importance=0.5
+)
 
-    # High importance -> Persistent tier (long-term)
-    await system.store("User's home address: 123 Main St", importance=0.9)
-
-    # Check where memories are stored
-    export = await system.export()
-    for tier, entries in export.items():
-        print(f"{tier}: {len(entries)} memories")
-
-asyncio.run(tier_example())
+# Low importance → Ephemeral tier (short-lived cache)
+await memory.store(
+    "Temporary calculation result: 42",
+    importance=0.2
+)
 ```
 
-**Output**:
+#### Store with Tags
 
-```
-ephemeral: 1 memories
-session: 1 memories
-persistent: 1 memories
-```
-
----
-
-## Working with Metadata
-
-Add rich metadata to memories for better filtering and organization:
+Tags help categorize and filter memories:
 
 ```python
-async def metadata_example():
-    from axon.models.base import PrivacyLevel
-
-    await system.store(
-        "Customer support ticket #1234 resolved",
-        importance=0.7,
-        metadata={
-            "user_id": "user_123",
-            "session_id": "sess_456",
-            "ticket_id": "1234",
-            "status": "resolved",
-            "privacy_level": PrivacyLevel.INTERNAL
-        },
-        tags=["support", "ticket", "resolved"]
-    )
-
-    # Recall with metadata filter
-    from axon.models import Filter
-
-    filter_obj = Filter(
-        user_id="user_123",
-        tags=["support"]
-    )
-
-    results = await system.recall(
-        "support tickets",
-        k=10,
-        filter=filter_obj
-    )
-
-    print(f"Found {len(results)} support tickets for user_123")
-
-asyncio.run(metadata_example())
+await memory.store(
+    "User prefers dark mode in settings",
+    importance=0.7,
+    tags=["preferences", "ui", "settings"]
+)
 ```
 
----
+#### Store with Metadata
 
-## Memory Lifecycle
+Add structured metadata for context:
+
+```python
+await memory.store(
+    "User completed onboarding tutorial",
+    importance=0.6,
+    metadata={
+        "user_id": "user_12345",
+        "session_id": "session_abc",
+        "source": "onboarding_flow"
+    },
+    tags=["milestone", "onboarding"]
+)
+```
+
+#### Explicit Tier Selection
+
+Force storage to a specific tier:
+
+```python
+# Store in ephemeral tier (ignores importance score)
+await memory.store(
+    "Temporary cache: recent search query",
+    tier="ephemeral",
+    tags=["cache", "temporary"]
+)
+
+# Store in persistent tier
+await memory.store(
+    "Critical data that must persist",
+    tier="persistent"
+)
+```
+
+### Recalling Memories
+
+Retrieve memories using semantic search, filtering, and multi-tier queries.
+
+#### Basic Recall
+
+```python
+# Find top 5 most relevant memories
+results = await memory.recall("user preferences", k=5)
+
+for entry in results:
+    print(f"Text: {entry.text}")
+    print(f"Importance: {entry.importance}")
+    print(f"Tags: {entry.tags}")
+    print("---")
+```
+
+#### Recall from Specific Tiers
+
+```python
+# Search only in persistent tier
+results = await memory.recall(
+    "user email",
+    k=10,
+    tiers=["persistent"]
+)
+
+# Search across multiple tiers
+results = await memory.recall(
+    "recent activity",
+    k=10,
+    tiers=["ephemeral", "session"]
+)
+```
+
+#### Recall with Filters
+
+Filter by tags or metadata:
+
+```python
+from axon.models import Filter
+
+# Filter by tags
+filter_obj = Filter(tags=["preferences", "ui"])
+results = await memory.recall("settings", k=10, filter=filter_obj)
+
+# Filter by metadata
+filter_obj = Filter(metadata={"user_id": "user_12345"})
+results = await memory.recall("user data", k=10, filter=filter_obj)
+```
 
 ### Forgetting Memories
 
 Remove memories you no longer need:
 
 ```python
-async def forget_example():
-    # Store a temporary memory
-    entry_id = await system.store("Temporary data", importance=0.3)
-
-    # Forget by ID
-    await system.forget(entry_id)
-    print("Memory forgotten!")
-
-    # Or forget by filter
-    from axon.models import Filter
-
-    filter_obj = Filter(tags=["temporary"])
-    count = await system.forget(filter_obj)
-    print(f"Forgot {count} temporary memories")
-
-asyncio.run(forget_example())
-```
-
-### Compacting Memories
-
-Summarize and compact memories to save space:
-
-```python
-async def compact_example():
-    # Store many related memories
-    for i in range(20):
-        await system.store(
-            f"Meeting note {i}: Discussed quarterly targets",
-            importance=0.6,
-            tags=["meeting"]
-        )
-
-    # Compact using count-based strategy
-    result = await system.compact(
-        tier="session",
-        strategy="count",
-        threshold=10,  # Compact when >10 entries
-        dry_run=True   # Preview without executing
-    )
-
-    print(f"Would compact {len(result.entries_to_compact)} entries")
-    print(f"Into {result.num_summaries} summaries")
-
-asyncio.run(compact_example())
+# Forget a specific memory by ID
+await memory.forget(entry_id)
 ```
 
 ---
 
-## Using Templates
+## Configuration Templates
 
-Axon provides pre-configured templates for common use cases:
+Axon provides pre-configured templates for different use cases.
 
-### Development Template
+### Available Templates
 
 ```python
+from axon.core.templates import (
+    DEVELOPMENT_CONFIG,     # All in-memory (no dependencies)
+    LIGHTWEIGHT_CONFIG,     # Redis only (fast, simple)
+    STANDARD_CONFIG,        # Redis + ChromaDB (balanced)
+    PRODUCTION_CONFIG,      # Redis + Pinecone (scalable)
+    QDRANT_CONFIG,         # Redis + Qdrant (high-performance)
+)
+```
+
+### Development Config
+
+Perfect for local development and testing:
+
+```python
+from axon import MemorySystem
 from axon.core.templates import DEVELOPMENT_CONFIG
 
-system = MemorySystem(config=DEVELOPMENT_CONFIG)
-# - In-memory storage (no external dependencies)
-# - Relaxed policies
-# - No embeddings required
+# All in-memory - no external dependencies required
+memory = MemorySystem(DEVELOPMENT_CONFIG)
 ```
 
-### Aggressive Caching
+**Features:**
+
+- ✓ No external dependencies (Redis, databases)
+- ✓ Fast startup and execution
+- ✓ Perfect for testing and CI/CD
+- ✗ Data lost on restart
+
+### Standard Config
+
+Balanced setup for most applications:
 
 ```python
-from axon.core.templates import aggressive_caching
+from axon.core.templates import STANDARD_CONFIG
 
-config = aggressive_caching()
-system = MemorySystem(config=config)
-# - Short TTLs for ephemeral data
-# - Frequent compaction
-# - Optimized for high-volume, low-retention
+# Redis for caching + ChromaDB for vectors
+memory = MemorySystem(STANDARD_CONFIG)
 ```
 
-### Long-Term Retention
+**Features:**
 
-```python
-from axon.core.templates import long_term_retention
+- ✓ Redis for ephemeral/session tiers (fast)
+- ✓ ChromaDB for persistent tier (vector search)
+- ✓ Good balance of performance and features
+- ⚠️ Requires: Redis, ChromaDB
 
-config = long_term_retention()
-system = MemorySystem(config=config)
-# - Extended TTLs
-# - Higher capacity limits
-# - Optimized for knowledge retention
+**Setup:**
+
+```bash
+# Install dependencies
+pip install "axon-sdk[all]"
+
+# Start Redis (Docker)
+docker run -d -p 6379:6379 redis:latest
 ```
 
-### Balanced (Recommended)
+### Production Config
+
+High-scale production deployments:
 
 ```python
-from axon.core.templates import balanced
+from axon.core.templates import PRODUCTION_CONFIG
 
-config = balanced()
-system = MemorySystem(config=config)
-# - Balanced TTLs and capacity
-# - Moderate compaction
-# - Good for most applications
+# Redis + Pinecone for production scale
+memory = MemorySystem(PRODUCTION_CONFIG)
+```
+
+**Features:**
+
+- ✓ Redis for caching (distributed)
+- ✓ Pinecone for vectors (managed, scalable)
+- ✓ Automatic tier promotion/demotion
+- ⚠️ Requires: Redis, Pinecone account
+
+---
+
+## Understanding Memory Tiers
+
+Axon automatically routes memories to different tiers based on importance and access patterns.
+
+### The Three Tiers
+
+| Tier | Purpose | Typical TTL | Storage | Use Cases |
+|------|---------|-------------|---------|-----------|
+| **Ephemeral** | Short-lived cache | 30-60s | Redis/Memory | API responses, calculations |
+| **Session** | Session-scoped | 5-30min | Redis | User activity, cart data |
+| **Persistent** | Long-term storage | Unlimited | Vector DB | User profiles, knowledge |
+
+### Automatic Tier Routing
+
+```python
+# Importance determines the tier
+await memory.store("temp data", importance=0.1)  # → Ephemeral
+await memory.store("session data", importance=0.5)  # → Session  
+await memory.store("user profile", importance=0.9)  # → Persistent
+```
+
+### Tier Visualization
+
+```
+           Importance Score
+0.0 ────────┬────────────┬──────────── 1.0
+            │            │
+      Ephemeral     Session    Persistent
+      (0.0-0.3)   (0.3-0.7)    (0.7-1.0)
 ```
 
 ---
 
-## Adding Embeddings
+## Common Patterns
 
-For semantic search, add an embedder:
-
-=== "OpenAI"
-
-    ```python
-    import os
-    from axon import MemorySystem
-    from axon.embedders import OpenAIEmbedder
-    from axon.core.config import MemoryConfig
-    from axon.core.policies import PersistentPolicy
-    from axon.adapters import ChromaAdapter
-
-    os.environ["OPENAI_API_KEY"] = "sk-..."
-
-    config = MemoryConfig(
-        tiers={
-            "persistent": PersistentPolicy(
-                backend="chromadb",
-                embedder="openai"
-            )
-        }
-    )
-
-    embedder = OpenAIEmbedder(model="text-embedding-3-small")
-    system = MemorySystem(config=config, embedder=embedder)
-
-    # Now store and recall with embeddings
-    await system.store("Quantum computing fundamentals")
-    results = await system.recall("explain quantum mechanics", k=3)
-    ```
-
-=== "Sentence Transformers (Local)"
-
-    ```python
-    from axon.embedders import SentenceTransformerEmbedder
-
-    embedder = SentenceTransformerEmbedder(
-        model_name="all-MiniLM-L6-v2"  # Fast local model
-    )
-
-    system = MemorySystem(config=config, embedder=embedder)
-
-    # Embedding happens automatically
-    await system.store("Machine learning tutorial")
-    ```
-
----
-
-## Enabling Audit Logging
-
-Track all operations for compliance:
+### Pattern 1: User Preferences
 
 ```python
-from axon.core import AuditLogger
+async def save_user_preference(user_id: str, key: str, value: str):
+    """Store user preference with high importance."""
+    await memory.store(
+        f"User preference: {key} = {value}",
+        importance=0.8,  # Persistent tier
+        metadata={"user_id": user_id, "preference_key": key},
+        tags=["preferences", "user_settings"]
+    )
 
-# Create audit logger
-audit_logger = AuditLogger(
-    max_events=10000,
-    enable_rotation=True
-)
-
-# Create system with audit logging
-system = MemorySystem(
-    config=balanced(),
-    audit_logger=audit_logger
-)
-
-# All operations are automatically logged
-await system.store("Sensitive data", importance=0.8)
-await system.recall("sensitive", k=5)
-
-# Export audit log
-events = await system.export_audit_log()
-print(f"Logged {len(events)} events")
-
-# Filter by operation type
-from axon.models.audit import OperationType
-
-store_events = await system.export_audit_log(
-    operation=OperationType.STORE
-)
-print(f"Stored {len(store_events)} items")
+async def get_user_preferences(user_id: str):
+    """Retrieve all preferences for a user."""
+    from axon.models import Filter
+    
+    filter_obj = Filter(
+        metadata={"user_id": user_id},
+        tags=["preferences"]
+    )
+    return await memory.recall(
+        "user preferences",
+        k=50,
+        filter=filter_obj,
+        tiers=["persistent"]
+    )
 ```
 
----
-
-## Privacy & PII Detection
-
-Automatically detect and classify sensitive information:
+### Pattern 2: Session Management
 
 ```python
-# PII detection enabled by default
-system = MemorySystem(config=balanced(), enable_pii_detection=True)
+from datetime import datetime
 
-# Store text with PII
-entry_id = await system.store(
-    "Contact customer at john.doe@example.com or 555-1234"
-)
+async def track_user_action(session_id: str, action: str):
+    """Track user actions in current session."""
+    await memory.store(
+        f"User action: {action}",
+        importance=0.5,  # Session tier
+        metadata={
+            "session_id": session_id,
+            "action_type": action,
+            "timestamp": datetime.now().isoformat()
+        },
+        tags=["session", "activity"]
+    )
 
-# Retrieve and check privacy level
-tier, entry = await system._get_entry_by_id(entry_id)
-
-print(f"Privacy Level: {entry.metadata.privacy_level}")
-# Output: Privacy Level: PrivacyLevel.INTERNAL
-
-print(f"Detected PII: {entry.metadata.pii_detection.detected_types}")
-# Output: Detected PII: {'email', 'phone'}
+async def get_session_history(session_id: str):
+    """Get all actions in current session."""
+    from axon.models import Filter
+    
+    filter_obj = Filter(metadata={"session_id": session_id})
+    return await memory.recall(
+        "session history",
+        k=100,
+        filter=filter_obj,
+        tiers=["session"]
+    )
 ```
 
----
-
-## Integration with LangChain
-
-Use Axon as LangChain memory:
+### Pattern 3: Temporary Cache
 
 ```python
-from axon import MemorySystem
-from axon.integrations.langchain import AxonChatMemory
-from langchain_openai import ChatOpenAI
-from langchain.chains import LLMChain
-from langchain.prompts import PromptTemplate
-
-# Create memory-backed chatbot
-system = MemorySystem(config=balanced())
-memory = AxonChatMemory(system=system)
-
-llm = ChatOpenAI(model="gpt-4")
-template = PromptTemplate(
-    input_variables=["history", "input"],
-    template="Conversation history:\n{history}\n\nHuman: {input}\nAI:"
-)
-
-chain = LLMChain(llm=llm, memory=memory, prompt=template)
-
-# Chat with persistent memory
-response = await chain.arun("Hello, my name is Alice")
-# AI: Nice to meet you, Alice!
-
-response = await chain.arun("What's my name?")
-# AI: Your name is Alice!
-```
-
----
-
-## Integration with LlamaIndex
-
-Use Axon as LlamaIndex vector store:
-
-```python
-from axon import MemorySystem
-from axon.integrations.llamaindex import AxonVectorStore
-from llama_index.core import VectorStoreIndex, Document
-
-# Create vector store
-system = MemorySystem(config=balanced())
-vector_store = AxonVectorStore(system=system)
-
-# Create index
-documents = [
-    Document(text="Paris is the capital of France"),
-    Document(text="Berlin is the capital of Germany"),
-]
-
-index = VectorStoreIndex.from_documents(
-    documents,
-    vector_store=vector_store
-)
-
-# Query
-query_engine = index.as_query_engine()
-response = await query_engine.aquery("What is the capital of France?")
-print(response)
-# Output: Paris is the capital of France
-```
-
----
-
-## Complete Example
-
-Here's a full example combining multiple features:
-
-```python
-import asyncio
-from dotenv import load_dotenv
-from axon import MemorySystem
-from axon.core.templates import balanced
-from axon.core import AuditLogger
-from axon.models import Filter
-from axon.models.base import PrivacyLevel
-
-load_dotenv()
-
-async def main():
-    # Setup
-    audit_logger = AuditLogger()
-    system = MemorySystem(
-        config=balanced(),
-        audit_logger=audit_logger,
-        enable_pii_detection=True
+async def cache_api_response(key: str, data: str):
+    """Cache API response briefly."""
+    await memory.store(
+        f"API cache: {key} = {data}",
+        importance=0.1,  # Ephemeral tier
+        tier="ephemeral",
+        tags=["cache", "api"],
+        metadata={"cache_key": key}
     )
 
-    # Store memories
-    print("Storing memories...")
-    await system.store(
-        "User John prefers email notifications",
-        importance=0.8,
-        metadata={"user_id": "john"},
-        tags=["preference", "notifications"]
+async def get_cached_response(key: str):
+    """Try to retrieve from cache."""
+    from axon.models import Filter
+    
+    filter_obj = Filter(metadata={"cache_key": key})
+    results = await memory.recall(
+        f"cache {key}",
+        k=1,
+        filter=filter_obj,
+        tiers=["ephemeral"]
     )
-
-    await system.store(
-        "Meeting scheduled for tomorrow at 2 PM",
-        importance=0.6,
-        metadata={"user_id": "john"},
-        tags=["calendar", "todo"]
-    )
-
-    # Recall
-    print("\nRecalling memories...")
-    results = await system.recall(
-        "john's preferences",
-        k=5,
-        filter=Filter(tags=["preference"])
-    )
-
-    for entry in results:
-        print(f"- {entry.text} (importance: {entry.metadata.importance})")
-
-    # Export audit log
-    print("\nAudit log:")
-    events = await system.export_audit_log()
-    print(f"Total events: {len(events)}")
-
-    # Compact
-    print("\nCompacting session tier...")
-    result = await system.compact(tier="session", dry_run=True)
-    print(f"Would compact {len(result.entries_to_compact)} entries")
-
-if __name__ == "__main__":
-    asyncio.run(main())
+    return results[0] if results else None
 ```
 
 ---
@@ -515,140 +440,120 @@ if __name__ == "__main__":
 
 <div class="grid cards" markdown>
 
--   :fontawesome-solid-book:{ .lg .middle } **Core Concepts**
+-   :material-cog:{ .lg .middle } **Configuration**
 
     ---
 
-    Deep dive into tiers, policies, and routing.
+    Learn about custom policies, tier configuration, and advanced settings.
 
-    [:octicons-arrow-right-24: Learn More](../concepts/overview.md)
+    [:octicons-arrow-right-24: Configuration Guide](configuration.md)
+
+-   :material-layers:{ .lg .middle } **Core Concepts**
+
+    ---
+
+    Deep dive into memory tiers, policies, routing, and lifecycle.
+
+    [:octicons-arrow-right-24: Core Concepts](../concepts/overview.md)
 
 -   :material-database:{ .lg .middle } **Storage Adapters**
 
     ---
 
-    Configure Redis, ChromaDB, Qdrant, and more.
+    Learn about Redis, ChromaDB, Qdrant, Pinecone, and custom adapters.
 
-    [:octicons-arrow-right-24: Adapters](../adapters/overview.md)
+    [:octicons-arrow-right-24: Adapters Guide](../adapters/overview.md)
 
--   :material-shield-check:{ .lg .middle } **Advanced Features**
-
-    ---
-
-    Explore audit logging, transactions, and privacy.
-
-    [:octicons-arrow-right-24: Advanced](../advanced/audit.md)
-
--   :material-api:{ .lg .middle } **API Reference**
+-   :material-code-braces:{ .lg .middle } **Examples**
 
     ---
 
-    Complete API documentation.
+    Explore 45+ working examples covering all features.
 
-    [:octicons-arrow-right-24: API Docs](../api/memory-system.md)
+    [:octicons-arrow-right-24: Browse Examples](../examples/basic.md)
 
 </div>
 
 ---
 
-## Common Patterns
+## Quick Reference
 
-### Session-Scoped Memories
-
-```python
-session_id = "sess_123"
-
-await system.store(
-    "User viewing product page",
-    importance=0.4,
-    metadata={"session_id": session_id}
-)
-
-# Recall session-specific memories
-results = await system.recall(
-    "session activity",
-    filter=Filter(session_id=session_id)
-)
-```
-
-### Time-Based Queries
+### Essential Imports
 
 ```python
-from datetime import datetime, timedelta
-
-# Recall recent memories
-one_hour_ago = datetime.utcnow() - timedelta(hours=1)
-
-filter_obj = Filter(
-    created_after=one_hour_ago
-)
-
-recent = await system.recall("activity", filter=filter_obj)
+from axon import MemorySystem
+from axon.core.templates import DEVELOPMENT_CONFIG, STANDARD_CONFIG
+from axon.models import Filter
 ```
 
-### Bulk Operations
+### Basic Operations
 
 ```python
-# Bulk store
-entries = [
-    "Memory 1",
-    "Memory 2",
-    "Memory 3"
-]
+# Store
+entry_id = await memory.store(text, importance=0.5, tags=[], metadata={})
 
-ids = []
-for text in entries:
-    entry_id = await system.store(text, importance=0.5)
-    ids.append(entry_id)
+# Recall
+results = await memory.recall(query, k=10, filter=None, tiers=None)
 
-# Bulk forget
-for entry_id in ids:
-    await system.forget(entry_id)
+# Forget
+await memory.forget(entry_id)
 ```
 
----
+### Configuration
 
-## Tips & Best Practices
+```python
+# Use a template
+memory = MemorySystem(DEVELOPMENT_CONFIG)
 
-!!! tip "Importance Scores"
-    - **0.0-0.3**: Ephemeral data (logs, temporary calculations)
-    - **0.3-0.7**: Session data (browsing history, conversation context)
-    - **0.7-1.0**: Critical data (user preferences, knowledge base)
+# Or create custom config
+from axon.core.config import MemoryConfig
+from axon.core.policies import SessionPolicy
 
-!!! info "Tags"
-    Use consistent tagging for better filtering:
-    ```python
-    tags=["category", "subcategory", "status"]
-    ```
-
-!!! warning "Embeddings"
-    Only enable embeddings if you need semantic search. Text-only mode is faster and cheaper.
-
-!!! success "Async All the Way"
-    Always use `await` with Axon methods - they're all async!
+config = MemoryConfig(
+    session=SessionPolicy(
+        adapter_type="redis",
+        ttl_seconds=600,
+        max_entries=1000
+    ),
+    default_tier="session"
+)
+memory = MemorySystem(config)
+```
 
 ---
 
 ## Troubleshooting
 
-### No Results from Recall
+### "No module named 'redis'"
 
-**Problem**: `recall()` returns empty list
+Install Redis client:
 
-**Solution**: Check if embedder is configured for semantic search, or use text-only mode
+```bash
+pip install redis>=5.0.0
+```
 
-### Slow Performance
+### "Connection refused" (Redis)
 
-**Problem**: Operations take too long
+Start Redis server:
 
-**Solution**: Use appropriate tier routing and consider Redis for ephemeral tier
+```bash
+docker run -d -p 6379:6379 redis:latest
+```
 
-### Memory Not Persisting
+### "Async function not awaited"
 
-**Problem**: Memories disappear after restart
+Remember to use `await` and `async`:
 
-**Solution**: Ensure persistent tier uses a durable backend (ChromaDB, Qdrant, not in-memory)
+```python
+# Wrong
+entry_id = memory.store("text")
 
----
+# Correct
+entry_id = await memory.store("text")
+```
 
-Ready to build amazing LLM applications with Axon? Dive deeper into the [Core Concepts](../concepts/overview.md)!
+### Need more help?
+
+- 📖 [Full Documentation](http://axon.saranmahadev.in)
+- 💬 [GitHub Discussions](https://github.com/saranmahadev/Axon/discussions)
+- 🐛 [Report Issues](https://github.com/saranmahadev/Axon/issues)

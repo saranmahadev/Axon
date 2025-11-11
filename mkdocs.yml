@@ -181,12 +181,13 @@ nav:
       - LangChain: integrations/langchain.md
       - LlamaIndex: integrations/llamaindex.md
   - API Reference:
-      - MemorySystem: api/memory-system.md
+      - Configuration: api/config.md
       - Models: api/models.md
       - Adapters: api/adapters.md
       - Policies: api/policies.md
       - Router: api/router.md
       - Embedders: api/embedders.md
+      - Utilities: api/utilities.md
   - Deployment:
       - Production Guide: deployment/production.md
       - Performance Tuning: deployment/performance.md
@@ -194,9 +195,10 @@ nav:
       - Security: deployment/security.md
   - Examples:
       - Basic Usage: examples/basic.md
-      - Multi-Tier: examples/multi-tier.md
-      - RAG Application: examples/rag.md
-      - Chatbot: examples/chatbot.md
+      - Intermediate: examples/intermediate.md
+      - Advanced: examples/advanced.md
+      - Integrations: examples/integrations.md
+      - Real-World: examples/real-world.md
   - Contributing:
       - Development Guide: contributing/development.md
       - Testing: contributing/testing.md
