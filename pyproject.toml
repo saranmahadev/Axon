@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "Saran Mahadev", email = "sarandevnet@gmail.com"}
+    {name = "Saran Mahadev", email = "saranmahadev8@gmail.com"}
 ]
 keywords = ["llm", "memory", "rag", "vector-database", "ai", "machine-learning"]
 classifiers = [
