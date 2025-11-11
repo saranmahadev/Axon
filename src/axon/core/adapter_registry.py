@@ -200,7 +200,7 @@ class AdapterRegistry:
             "compaction_strategy",
             "archive_adapter",
         }
-        {k: v for k, v in config.items() if k not in policy_fields}
+        config = {k: v for k, v in config.items() if k not in policy_fields}
 
         if adapter_type == "memory":
             from axon.adapters.memory import InMemoryAdapter

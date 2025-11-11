@@ -1,16 +1,16 @@
 [project]
-name = "axon"
-version = "0.1.0"
+name = "axon-sdk"
+version = "1.0.0b2"
 description = "Unified Memory SDK for LLM applications with multi-tier storage, policy-driven lifecycle, and intelligent summarization"
 readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "AxonML Team", email = "team@axonml.dev"}
+    {name = "Saran Mahadev", email = "sarandevnet@gmail.com"}
 ]
 keywords = ["llm", "memory", "rag", "vector-database", "ai", "machine-learning"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -24,6 +24,8 @@ classifiers = [
 dependencies = [
     "pydantic>=2.0.0",
     "typing-extensions>=4.0.0",
+    "numpy>=1.24.0",
+    "openai>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -45,10 +47,10 @@ all = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/axonml/axon"
-Documentation = "https://axon.readthedocs.io"
-Repository = "https://github.com/axonml/axon"
-"Bug Tracker" = "https://github.com/axonml/axon/issues"
+Homepage = "https://github.com/saranmahadev/Axon"
+Documentation = "http://axon.saranmahadev.in"
+Repository = "https://github.com/saranmahadev/Axon"
+"Bug Tracker" = "https://github.com/saranmahadev/Axon/issues"
 
 [build-system]
 requires = ["hatchling"]

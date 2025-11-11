@@ -5,12 +5,12 @@
 **Unified Memory SDK for LLM Applications**
 
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.0.0--beta-orange.svg)](https://github.com/yourusername/Axon)
-[![Tests](https://img.shields.io/badge/tests-97.8%25%20passing-success.svg)](tests/)
-[![Coverage](https://img.shields.io/badge/coverage-42%25-yellow.svg)](htmlcov/)
+[![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-1.0.0--beta2-orange.svg)](https://github.com/saranmahadev/Axon)
+[![Tests](https://img.shields.io/badge/tests-100%25%20passing-success.svg)](tests/)
+[![PyPI](https://img.shields.io/badge/pypi-axon--sdk-blue.svg)](https://pypi.org/project/axon-sdk/)
 
-[Documentation](https://docs.axon.ai) · [Examples](examples/) · [API Reference](https://docs.axon.ai/api/memory-system/) · [Changelog](CHANGELOG.md)
+[Documentation](http://axon.saranmahadev.in) · [Examples](examples/) · [API Reference](http://axon.saranmahadev.in/api/memory-system/) · [Changelog](CHANGELOG.md)
 
 </div>
 
@@ -252,7 +252,7 @@ async with tx_manager.transaction() as tx:
 
 ```bash
 # Clone repository
-git clone https://github.com/yourusername/Axon.git
+git clone https://github.com/saranmahadev/Axon.git
 cd Axon
 
 # Create virtual environment
@@ -358,9 +358,9 @@ Axon is released under the [MIT License](LICENSE).
 
 ## Support
 
-- **GitHub Issues:** [Report bugs](https://github.com/yourusername/Axon/issues)
-- **Discussions:** [Ask questions](https://github.com/yourusername/Axon/discussions)
-- **Documentation:** [Read the docs](https://docs.axon.ai)
+- **GitHub Issues:** [Report bugs](https://github.com/saranmahadev/Axon/issues)
+- **Discussions:** [Ask questions](https://github.com/saranmahadev/Axon/discussions)
+- **Documentation:** [Read the docs](http://axon.saranmahadev.in)
 
 ## Acknowledgments
 
@@ -374,8 +374,8 @@ Built with:
 
 <div align="center">
 
-**Made with ❤️ by the Axon Team**
+**Made with ❤️ by Saran Mahadev**
 
-[Website](https://axon.ai) · [GitHub](https://github.com/yourusername/Axon) · [Twitter](https://twitter.com/axon)
+[Documentation](http://axon.saranmahadev.in) · [GitHub](https://github.com/saranmahadev/Axon) · [PyPI](https://pypi.org/project/axon-sdk/)
 
 </div>

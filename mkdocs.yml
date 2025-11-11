@@ -1,10 +1,10 @@
 site_name: Axon Documentation
 site_description: Unified Memory SDK for LLM Applications
-site_author: Axon Team
-site_url: https://github.com/yourusername/Axon
+site_author: Saran Mahadev
+site_url: http://axon.saranmahadev.in
 
-repo_name: Axon
-repo_url: https://github.com/yourusername/Axon
+repo_name: saranmahadev/Axon
+repo_url: https://github.com/saranmahadev/Axon
 edit_uri: edit/main/docs/
 
 theme:
@@ -137,9 +137,9 @@ extra:
     provider: mike
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/yourusername/Axon
+      link: https://github.com/saranmahadev/Axon
     - icon: fontawesome/brands/python
-      link: https://pypi.org/project/axon/
+      link: https://pypi.org/project/axon-sdk/
   analytics:
     provider: google
     property: !ENV GOOGLE_ANALYTICS_KEY

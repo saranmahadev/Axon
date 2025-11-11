@@ -60,6 +60,7 @@ class RedisAdapter(StorageAdapter):
         default_ttl: int | None = None,
         max_connections: int = 10,
         decode_responses: bool = True,
+        **kwargs,
     ):
         """Initialize Redis adapter with connection pool."""
         self.host = host
