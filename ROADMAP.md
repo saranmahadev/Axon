@@ -40,12 +40,15 @@ phase's exit criteria are met (Phases 4 and 5 may overlap).
 
 ## Phase 1: Correctness and stability (2-3 weeks)
 
+**Also fixed so far:** audit auto-export deadlock and overwrite; `store()` crash with audit logging + string `privacy_level`.
+**Found, still open:** `test_audit_flow` performance test is timing-flaky; `export()` fallback calls sync `list_ids()` (not on Redis/Pinecone); several adapter/embedder tests need optional deps (`python-dotenv` is undeclared); compaction integration tests need `dotenv`/OpenAI.
+
 **Goal:** the core behaves as documented.
 
 - [ ] **Known bugs**
-  - [ ] Tier capacity tracking so overflow and eviction work (`policy_engine.py`)
-  - [ ] Replace silent `except: pass` blocks with logged, propagated errors
-  - [ ] Confirm `forget()` works by ID and by filter across every tier
+  - [x] Tier capacity tracking so overflow fires (`policy_engine.py`); *eviction on overflow is still log-only*
+  - [x] Replace silent `except: pass` blocks with logged, propagated errors (`memory_system.py`, Qdrant/Pinecone counts)
+  - [x] `forget()` works by ID and by filter across every tier (was broken and missing on `MemorySystem`; now tested end to end)
 - [ ] **End-to-end behavior tests** for: promotion/demotion, TTL expiry, compaction with
       provenance, transaction rollback on partial failure, audit events on success and
       failure, PII detection (including odd input)
