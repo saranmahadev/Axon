@@ -299,3 +299,25 @@ class TestAdapterLifecycle:
         repr_str = repr(registry)
 
         assert "initialized" in repr_str
+
+
+class TestPolicyTtlReachesRedis:
+    """A tier's ttl_seconds must become the Redis adapter's native default TTL."""
+
+    def test_ttl_seconds_becomes_default_ttl(self):
+        from axon.core.policies import EphemeralPolicy
+
+        registry = AdapterRegistry()
+        adapter = registry._create_adapter(
+            "redis", EphemeralPolicy(adapter_type="redis", ttl_seconds=90)
+        )
+
+        assert adapter.default_ttl == 90
+
+    def test_explicit_default_ttl_is_not_overridden(self):
+        registry = AdapterRegistry()
+        adapter = registry._create_adapter(
+            "redis", {"adapter_type": "redis", "ttl_seconds": 90, "default_ttl": 7}
+        )
+
+        assert adapter.default_ttl == 7

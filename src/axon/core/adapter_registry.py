@@ -194,6 +194,9 @@ class AdapterRegistry:
         if hasattr(config, "model_dump"):
             config = config.model_dump()
 
+        # Redis can expire keys natively: hand it the tier's TTL as its default
+        policy_ttl = config.get("ttl_seconds")
+
         # Filter out policy-specific fields that adapters don't need
         policy_fields = {
             "tier_name",
@@ -216,6 +219,8 @@ class AdapterRegistry:
         elif adapter_type == "redis":
             from axon.adapters.redis import RedisAdapter
 
+            if policy_ttl is not None:
+                config.setdefault("default_ttl", policy_ttl)
             return RedisAdapter(**config)
         elif adapter_type == "chroma":
             from axon.adapters.chroma import ChromaAdapter

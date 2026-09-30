@@ -5,7 +5,7 @@ Validates tier selection, routing operations (store/recall/forget),
 automatic promotion logic, and statistics tracking.
 """
 
-from datetime import datetime
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -25,8 +25,8 @@ def create_test_entry(
     """Helper to create test MemoryEntry."""
     metadata = MemoryMetadata(
         importance=importance,
-        created_at=datetime.now(),
-        last_accessed_at=datetime.now(),
+        created_at=datetime.now(timezone.utc),
+        last_accessed_at=datetime.now(timezone.utc),
         tags=["test"],
         user_id="test_user",
     )
@@ -278,10 +278,10 @@ class TestRouteRecall:
 
         await router.route_recall("test", k=5, tiers=["session"])
 
-        # Should query session tier (1 call in test setup + 1 in route_recall)
-        assert mock_registry.get_adapter.call_count == 2
-        # Verify it was called with "session"
-        mock_registry.get_adapter.assert_called_with("session")
+        # Only the session tier is touched: once to query, once to persist access metadata
+        assert {c.args for c in mock_registry.get_adapter.call_args_list} == {("session",)}
+        mock_adapter.query.assert_called_once()
+        mock_adapter.save.assert_called_once()  # updated access metadata written back
 
     @pytest.mark.asyncio
     async def test_recall_deduplicates_results(self, router, mock_registry):
@@ -401,7 +401,9 @@ class TestRouteForget:
         """Test forget operation by filter."""
         mock_filter = Filter(tags=["test"])
         mock_adapter = await mock_registry.get_adapter("session")
-        mock_adapter.delete.return_value = 3
+        mock_adapter.list_ids_async.return_value = ["a", "b", "c"]
+        mock_adapter.get.return_value = create_test_entry()  # tagged ["test"], matches
+        mock_adapter.delete.return_value = True
 
         deleted = await router.route_forget(filter=mock_filter)
 

@@ -488,6 +488,51 @@ class MemorySystem:
 
         return deleted
 
+    async def purge_expired(self, tier: str | None = None) -> int:
+        """
+        Delete entries whose tier TTL (``ttl_seconds``) has elapsed.
+
+        Expired entries are never returned by :meth:`recall`, which also removes the ones it
+        meets. Call this to sweep entries that are never recalled, so they stop counting
+        against tier capacity.
+
+        Args:
+            tier: Restrict the sweep to one tier (default: all tiers)
+
+        Returns:
+            Number of entries deleted
+
+        Raises:
+            TierNotFoundError: If ``tier`` is not configured
+            AdapterError: If a tier could not be swept (other tiers are still swept)
+        """
+        return await self.router.purge_expired(tier)
+
+    async def rebalance(self, tier: str | None = None) -> dict[str, int]:
+        """
+        Run lifecycle maintenance: remove expired entries, then demote what qualifies.
+
+        Demotion moves entries to the next lower tier when the policy engine scores them
+        low enough (stale, unimportant, or the tier is under capacity pressure). Tiers
+        that go over ``max_entries`` are also rebalanced automatically after a store.
+
+        Args:
+            tier: Restrict maintenance to one tier (default: all tiers)
+
+        Returns:
+            ``{"expired": <entries deleted>, "demoted": <entries moved down>}``
+
+        Raises:
+            TierNotFoundError: If ``tier`` is not configured
+            AdapterError: If some entries could not be processed
+        """
+        tiers = [tier] if tier else list(self.config.tiers)
+        expired = await self.router.purge_expired(tier)
+        demoted = 0
+        for t in tiers:
+            demoted += await self.router.demote_entries(t)
+        return {"expired": expired, "demoted": demoted}
+
     async def recall(
         self,
         query: str,

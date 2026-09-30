@@ -7,17 +7,22 @@ based on policy evaluation and scoring.
 """
 
 import logging
-from datetime import datetime
+import time
+from datetime import datetime, timezone
 from typing import Any
 
 from axon.core.adapter_registry import AdapterRegistry
 from axon.core.config import MemoryConfig
 from axon.core.policy_engine import PolicyEngine
-from axon.errors import ForgetIncompleteError, TierNotFoundError
+from axon.errors import AdapterError, ForgetIncompleteError, TierNotFoundError
 from axon.models.entry import MemoryEntry
 from axon.models.filter import Filter
 
 logger = logging.getLogger(__name__)
+
+# Metadata field holding an entry's absolute expiry time (epoch seconds), set from the
+# tier's ttl_seconds. Stored as a regular extra metadata field, so it works on every backend.
+EXPIRES_AT = "expires_at"
 
 
 class Router:
@@ -79,11 +84,27 @@ class Router:
         self.policy_engine = policy_engine
         self.embedder = embedder
 
+        # Time source for TTL decisions (epoch seconds); replaceable in tests
+        self._clock = time.time
+
         # Track tier statistics for monitoring
         self._tier_stats: dict[str, dict[str, int]] = {
-            "ephemeral": {"stores": 0, "recalls": 0, "forgets": 0, "promotions": 0},
-            "session": {"stores": 0, "recalls": 0, "forgets": 0, "promotions": 0, "demotions": 0},
-            "persistent": {"stores": 0, "recalls": 0, "forgets": 0, "demotions": 0},
+            "ephemeral": {"stores": 0, "recalls": 0, "forgets": 0, "promotions": 0, "expired": 0},
+            "session": {
+                "stores": 0,
+                "recalls": 0,
+                "forgets": 0,
+                "promotions": 0,
+                "demotions": 0,
+                "expired": 0,
+            },
+            "persistent": {
+                "stores": 0,
+                "recalls": 0,
+                "forgets": 0,
+                "demotions": 0,
+                "expired": 0,
+            },
         }
 
         logger.info(f"Router initialized with {len(config.tiers)} tiers")
@@ -173,31 +194,56 @@ class Router:
                 tier, list(self.config.tiers), f"Tier '{tier}' not found in configuration"
             )
 
-        # Check for overflow and handle if policy engine available
-        if self.policy_engine:
-            try:
-                is_overflow, overflow_details = await self.policy_engine.check_overflow_async(tier)
-            except Exception as e:
-                # A failing capacity check must not block writes, but it must be visible
-                logger.warning(f"Could not check capacity for tier '{tier}': {e}")
-                is_overflow, overflow_details = False, {}
-            if is_overflow:
-                logger.warning(
-                    f"Tier '{tier}' overflow detected: {overflow_details['overflow_amount']} "
-                    f"entries over limit"
-                )
-                # In a full implementation, would trigger compaction/demotion here
-                # For now, just log the overflow
-
-        # Get adapter and store entry
+        # Stamp the tier's TTL, then get adapter and store entry
+        self._apply_ttl(entry, tier)
         adapter = await self.registry.get_adapter(tier)
         entry_id = await adapter.save(entry)
 
         # Update statistics
         self._tier_stats[tier]["stores"] += 1
 
+        # Keep the tier within its capacity (best effort; never fails the store)
+        await self._enforce_capacity(tier)
+
         logger.debug(f"Stored entry {entry_id} in tier '{tier}'")
         return entry_id
+
+    async def _enforce_capacity(self, tier: str) -> None:
+        """Bring an over-capacity tier back under ``max_entries`` without deleting live data.
+
+        First sweeps expired entries; if the tier is still over its limit, demotes the
+        least recently used entries that qualify for demotion. Entries that do not qualify
+        stay, so the tier may remain over capacity (a warning is logged): Axon does not
+        hard-evict live memories.
+
+        Note: this scans the tier, so it runs only while the tier is over capacity.
+        """
+        if not self.policy_engine:
+            return
+
+        try:
+            is_overflow, details = await self.policy_engine.check_overflow_async(tier)
+            if not is_overflow:
+                return
+
+            logger.warning(
+                f"Tier '{tier}' overflow detected: {details['overflow_amount']} entries over limit"
+            )
+            await self.purge_expired(tier)
+
+            is_overflow, details = await self.policy_engine.check_overflow_async(tier)
+            if not is_overflow:
+                return
+
+            demoted = await self.demote_entries(tier, limit=details["overflow_amount"])
+            if demoted < details["overflow_amount"]:
+                logger.warning(
+                    f"Tier '{tier}' is still over capacity: demoted {demoted} of "
+                    f"{details['overflow_amount']} excess entries; the rest do not qualify"
+                )
+        except Exception as e:
+            # A failing capacity check must not block writes, but it must be visible
+            logger.warning(f"Could not enforce capacity for tier '{tier}': {e}")
 
     async def route_recall(
         self,
@@ -262,6 +308,9 @@ class Router:
                     # Fallback to text query (for adapters that support it)
                     results = await adapter.query(query_text, k=k, filter=filter)
 
+                # Expired entries must not be returned (or shadow a live copy elsewhere)
+                results = await self._drop_expired(results, adapter, tier)
+
                 # Deduplicate and track sources
                 for entry in results:
                     if entry.id not in seen_ids:
@@ -299,9 +348,11 @@ class Router:
                     )
 
         # Execute promotions (move entries to higher tiers)
+        moved_ids: set[str] = set()
         for entry, from_tier, to_tier in promoted_entries:
             try:
                 await self._promote_entry(entry, from_tier, to_tier)
+                moved_ids.add(entry.id)
                 self._tier_stats[from_tier]["promotions"] += 1
                 if "promotions" in self._tier_stats[to_tier]:
                     self._tier_stats[to_tier]["promotions"] += 1
@@ -309,6 +360,13 @@ class Router:
             except Exception as e:
                 logger.error(f"Failed to promote entry {entry.id}: {e}")
                 # Continue without failing the recall
+
+        # Persist the updated access metadata for entries that stayed where they are.
+        # Backends return copies, so without this the counts that drive promotion are lost.
+        for entry in all_results:
+            source_tier = tier_sources.get(entry.id)
+            if source_tier and entry.id not in moved_ids:
+                await self._persist_access_metadata(entry, source_tier)
 
         # Sort by relevance (if entries have scores) and return top k
         # Note: Actual score sorting would require score metadata from adapter
@@ -415,6 +473,159 @@ class Router:
 
         return deleted
 
+    async def demote_entries(self, tier: str, limit: int | None = None) -> int:
+        """
+        Demote entries of ``tier`` that qualify for demotion to the next lower tier.
+
+        Qualification is decided by the policy engine (low importance, no recent access,
+        and rising capacity pressure make an entry more likely to qualify). Entries are
+        demoted least-recently-used first, at most ``limit`` of them.
+
+        Returns:
+            Number of entries demoted
+
+        Raises:
+            TierNotFoundError: If ``tier`` is not configured
+            AdapterError: If some entries could not be moved (the others still were)
+        """
+        if tier not in self.config.tiers:
+            raise TierNotFoundError(
+                tier, list(self.config.tiers), f"Tier '{tier}' not found in configuration"
+            )
+        if not self.policy_engine:
+            return 0
+
+        adapter = await self.registry.get_adapter(tier)
+        pressure = await self._capacity_pressure(tier)
+
+        candidates: list[tuple[MemoryEntry, str]] = []
+        for entry_id in await adapter.list_ids_async():
+            try:
+                entry = await adapter.get(entry_id)
+            except KeyError:
+                continue
+            if self._is_expired(entry):
+                continue  # handled by purge_expired, not demoted
+            target = self.policy_engine.get_demotion_path(entry, tier, capacity_pressure=pressure)
+            if target is not None and target in self.config.tiers:
+                candidates.append((entry, target))
+
+        def last_use(item: tuple[MemoryEntry, str]) -> datetime:
+            meta = item[0].metadata
+            when = meta.last_accessed_at or meta.created_at
+            return when if when.tzinfo else when.replace(tzinfo=timezone.utc)
+
+        candidates.sort(key=last_use)
+        if limit is not None:
+            candidates = candidates[:limit]
+
+        demoted = 0
+        failures: list[str] = []
+        for entry, target in candidates:
+            try:
+                await self._demote_entry(entry, tier, target)
+            except Exception as e:
+                logger.error(f"Failed to demote entry {entry.id} {tier} → {target}: {e}")
+                failures.append(f"{entry.id}: {e}")
+                continue
+            demoted += 1
+            self._tier_stats[tier]["demotions"] += 1
+            logger.info(f"Demoted entry {entry.id}: {tier} → {target}")
+
+        if failures:
+            raise AdapterError(
+                f"Demotion incomplete in tier '{tier}': {demoted} demoted, "
+                f"{len(failures)} failed ({'; '.join(failures)})",
+                tier=tier,
+            )
+        return demoted
+
+    async def _capacity_pressure(self, tier: str) -> float:
+        """Fraction of ``max_entries`` in use (0.0 when the tier is unlimited), capped at 1."""
+        max_entries = getattr(self.config.tiers.get(tier), "max_entries", None)
+        if not max_entries:
+            return 0.0
+        count = (await self.registry.get_statistics(tier))["entry_count"]
+        return min(1.0, count / max_entries)
+
+    def _tier_ttl(self, tier: str) -> int | None:
+        """The tier policy's ttl_seconds (None = entries never expire)."""
+        return getattr(self.config.tiers.get(tier), "ttl_seconds", None)
+
+    def _apply_ttl(self, entry: MemoryEntry, tier: str) -> None:
+        """Set (or clear) the entry's expiry according to the tier it is being written to."""
+        ttl = self._tier_ttl(tier)
+        if ttl is not None:
+            setattr(entry.metadata, EXPIRES_AT, self._clock() + ttl)
+        elif getattr(entry.metadata, EXPIRES_AT, None) is not None:
+            setattr(entry.metadata, EXPIRES_AT, None)  # moved to a tier without a TTL
+
+    def _is_expired(self, entry: MemoryEntry) -> bool:
+        expires_at = getattr(entry.metadata, EXPIRES_AT, None)
+        return expires_at is not None and expires_at <= self._clock()
+
+    async def _drop_expired(self, entries: list[MemoryEntry], adapter: Any, tier: str) -> list:
+        """Return only live entries, lazily deleting the expired ones from ``adapter``."""
+        live = []
+        for entry in entries:
+            if not self._is_expired(entry):
+                live.append(entry)
+                continue
+            try:
+                await adapter.delete(entry.id)
+                self._tier_stats[tier]["expired"] += 1
+            except Exception as e:
+                logger.warning(f"Could not delete expired entry {entry.id} from '{tier}': {e}")
+        return live
+
+    async def purge_expired(self, tier: str | None = None) -> int:
+        """
+        Delete every expired entry from ``tier`` (default: all tiers).
+
+        Recall already hides and lazily removes expired entries it encounters; this sweeps
+        the ones that were never recalled, so they stop counting against capacity.
+
+        Returns:
+            Number of entries deleted
+
+        Raises:
+            TierNotFoundError: If ``tier`` is not configured
+            AdapterError: If a tier could not be swept (other tiers are still swept)
+        """
+        if tier is not None:
+            if tier not in self.config.tiers:
+                raise TierNotFoundError(
+                    tier, list(self.config.tiers), f"Tier '{tier}' not found in configuration"
+                )
+            tiers = [tier]
+        else:
+            tiers = list(self.config.tiers)
+
+        purged = 0
+        failures: dict[str, Exception] = {}
+        for t in tiers:
+            try:
+                adapter = await self.registry.get_adapter(t)
+                for entry_id in await adapter.list_ids_async():
+                    try:
+                        entry = await adapter.get(entry_id)
+                    except KeyError:
+                        continue  # removed concurrently, or expired natively (Redis)
+                    if self._is_expired(entry) and await adapter.delete(entry_id):
+                        purged += 1
+                        self._tier_stats[t]["expired"] += 1
+            except Exception as e:
+                logger.error(f"Error purging expired entries from tier '{t}': {e}")
+                failures[t] = e
+
+        if failures:
+            details = "; ".join(f"{t}: {e}" for t, e in failures.items())
+            raise AdapterError(
+                f"Purge incomplete: {purged} expired entries deleted, but {len(failures)} "
+                f"tier(s) failed ({details})"
+            )
+        return purged
+
     def _update_access_metadata(self, entry: MemoryEntry) -> None:
         """
         Update entry metadata to track access patterns.
@@ -426,83 +637,79 @@ class Router:
         Args:
             entry: Memory entry to update (modified in-place)
         """
-        # Update last_accessed_at
-        entry.metadata.last_accessed_at = datetime.now()
+        entry.metadata.last_accessed_at = datetime.now(timezone.utc)
 
-        # Update access_count in extra fields
-        if not hasattr(entry.metadata, "__pydantic_extra__"):
-            entry.metadata.__pydantic_extra__ = {}
-
-        current_count = entry.metadata.__pydantic_extra__.get("access_count", 0)
-        entry.metadata.__pydantic_extra__["access_count"] = current_count + 1
+        # access_count lives in the metadata's extra fields
+        current_count = getattr(entry.metadata, "access_count", 0)
+        entry.metadata.access_count = current_count + 1
 
         logger.debug(f"Updated access metadata for entry {entry.id}: " f"count={current_count + 1}")
 
+    async def _persist_access_metadata(self, entry: MemoryEntry, tier: str) -> None:
+        """Write updated access metadata back to the tier the entry was read from.
+
+        Best effort: a failed write is logged and never fails the recall.
+        """
+        try:
+            adapter = await self.registry.get_adapter(tier)
+            await adapter.save(entry)
+        except Exception as e:
+            logger.warning(f"Could not persist access metadata for entry {entry.id}: {e}")
+
     async def _promote_entry(self, entry: MemoryEntry, from_tier: str, to_tier: str) -> None:
-        """
-        Promote entry from one tier to another.
-
-        Steps:
-        1. Save entry to target tier
-        2. Delete from source tier
-        3. Update tier hint in metadata
-
-        Args:
-            entry: Memory entry to promote
-            from_tier: Source tier name
-            to_tier: Target tier name
-
-        Raises:
-            RuntimeError: If promotion fails
-        """
-        # Save to target tier
-        to_adapter = await self.registry.get_adapter(to_tier)
-
-        # Update tier hint in metadata
-        if not hasattr(entry.metadata, "__pydantic_extra__"):
-            entry.metadata.__pydantic_extra__ = {}
-        entry.metadata.__pydantic_extra__["tier"] = to_tier
-
-        await to_adapter.save(entry)
-
-        # Delete from source tier
-        from_adapter = await self.registry.get_adapter(from_tier)
-        await from_adapter.delete(entry_id=entry.id)
-
+        """Move an entry to a higher tier (see :meth:`_move_entry`)."""
+        await self._move_entry(entry, from_tier, to_tier)
         logger.debug(f"Promoted entry {entry.id}: {from_tier} → {to_tier}")
 
     async def _demote_entry(self, entry: MemoryEntry, from_tier: str, to_tier: str) -> None:
-        """
-        Demote entry from one tier to another.
+        """Move an entry to a lower tier (see :meth:`_move_entry`)."""
+        await self._move_entry(entry, from_tier, to_tier)
+        logger.debug(f"Demoted entry {entry.id}: {from_tier} → {to_tier}")
 
-        Steps:
-        1. Save entry to target tier
-        2. Delete from source tier
-        3. Update tier hint in metadata
+    async def _move_entry(self, entry: MemoryEntry, from_tier: str, to_tier: str) -> None:
+        """
+        Move an entry between tiers without ever leaving it in both.
+
+        Steps: save to the target tier, then delete from the source. If the source delete
+        fails, the target copy is removed again so the entry is not duplicated.
 
         Args:
-            entry: Memory entry to demote
+            entry: Memory entry to move
             from_tier: Source tier name
             to_tier: Target tier name
 
         Raises:
-            RuntimeError: If demotion fails
+            AdapterError: If the move fails (the entry then remains in the source tier)
         """
-        # Save to target tier
         to_adapter = await self.registry.get_adapter(to_tier)
+        from_adapter = await self.registry.get_adapter(from_tier)
 
-        # Update tier hint in metadata
-        if not hasattr(entry.metadata, "__pydantic_extra__"):
-            entry.metadata.__pydantic_extra__ = {}
-        entry.metadata.__pydantic_extra__["tier"] = to_tier
+        # Record the tier hint in the metadata's extra fields; the target tier's TTL applies
+        entry.metadata.tier = to_tier
+        self._apply_ttl(entry, to_tier)
 
         await to_adapter.save(entry)
 
-        # Delete from source tier
-        from_adapter = await self.registry.get_adapter(from_tier)
-        await from_adapter.delete(entry_id=entry.id)
-
-        logger.debug(f"Demoted entry {entry.id}: {from_tier} → {to_tier}")
+        try:
+            await from_adapter.delete(entry.id)
+        except Exception as e:
+            try:
+                await to_adapter.delete(entry.id)
+            except Exception as rollback_error:
+                logger.error(
+                    f"Entry {entry.id} is now in both '{from_tier}' and '{to_tier}': "
+                    f"source delete failed ({e}) and rollback failed ({rollback_error})"
+                )
+                raise AdapterError(
+                    f"Moving entry {entry.id} {from_tier} → {to_tier} failed and could not be "
+                    f"rolled back; it exists in both tiers: {e}",
+                    tier=from_tier,
+                ) from e
+            raise AdapterError(
+                f"Moving entry {entry.id} {from_tier} → {to_tier} failed; it remains in "
+                f"'{from_tier}': {e}",
+                tier=from_tier,
+            ) from e
 
     def get_tier_stats(self, tier: str | None = None) -> dict[str, Any]:
         """

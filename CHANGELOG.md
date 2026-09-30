@@ -33,9 +33,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Adapter contract test suite** (`tests/contract/`) run against every adapter. Redis and Qdrant use a
   live server via `AXON_TEST_REDIS_URL` / `AXON_TEST_QDRANT_URL` (Qdrant defaults to in-process).
 - Qdrant accepts arbitrary string entry ids (mapped deterministically to UUIDs).
+- `MemorySystem.purge_expired()` and `MemorySystem.rebalance()` (expired-entry sweep + demotion),
+  backed by `Router.purge_expired()` / `Router.demote_entries()`.
+- End-to-end lifecycle tests (`tests/integration/test_lifecycle.py`) on in-memory and real Redis.
 
 ### Fixed
 
+- **TTL was never enforced.** A tier's `ttl_seconds` was discarded, so "ephemeral" entries lived
+  forever. Entries now get an absolute `expires_at` when stored (reset when promoted/demoted into
+  another tier); expired entries are never returned by `recall()` and are deleted lazily, or
+  swept with `purge_expired()`. Redis also receives the tier TTL as its native `default_ttl`.
+- **Promotion copied instead of moving.** The source delete used the wrong argument, leaving the
+  entry in both tiers on every recall. Moves are now save-then-delete with rollback of the target
+  copy if the source delete fails.
+- **Access counts were lost** on every backend that returns copies (all except in-memory), so
+  access-frequency promotion could never trigger. `recall()` now persists updated access metadata.
+- **Demotion was never triggered** and tier overflow only logged a warning. Tiers over
+  `max_entries` are now brought back under the limit after a store by purging expired entries and
+  then demoting the least-recently-used entries that qualify; live entries are never deleted.
 - `forget()` deleted nothing and reported success (router called `adapter.delete()` with the wrong
   arguments). Failures in any tier now raise `ForgetIncompleteError` after all tiers are attempted.
 - **Chroma, Qdrant and Redis silently dropped custom/extra metadata** (`pii_detection`,

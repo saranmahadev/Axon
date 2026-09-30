@@ -41,17 +41,23 @@ phase's exit criteria are met (Phases 4 and 5 may overlap).
 ## Phase 1: Correctness and stability (2-3 weeks)
 
 **Also fixed so far:** audit auto-export deadlock and overwrite; `store()` crash with audit logging + string `privacy_level`.
-**Found, still open:** `test_audit_flow` performance test is timing-flaky; `export()` fallback calls sync `list_ids()` (not on Redis/Pinecone); several adapter/embedder tests need optional deps (`python-dotenv` is undeclared); compaction integration tests need `dotenv`/OpenAI.
+**Found, still open:** capacity enforcement scans the tier on each store while it is over capacity (needs a cheaper approach at scale); `MemorySystem.recall` needs an embedder on vector-store tiers (text queries only work on in-memory/Redis); `test_audit_flow` performance test is timing-flaky; `export()` fallback calls sync `list_ids()` (not on Redis/Pinecone); several adapter/embedder tests need optional deps (`python-dotenv` is undeclared); compaction integration tests need `dotenv`/OpenAI.
 
 **Goal:** the core behaves as documented.
 
 - [ ] **Known bugs**
-  - [x] Tier capacity tracking so overflow fires (`policy_engine.py`); *eviction on overflow is still log-only*
+  - [x] Tier capacity tracking so overflow fires (`policy_engine.py`); *overflow demotes/purges but never hard-evicts live entries; `eviction_strategy` is not implemented*
   - [x] Replace silent `except: pass` blocks with logged, propagated errors (`memory_system.py`, Qdrant/Pinecone counts)
   - [x] `forget()` works by ID and by filter across every tier (was broken and missing on `MemorySystem`; now tested end to end)
-- [ ] **End-to-end behavior tests** for: promotion/demotion, TTL expiry, compaction with
-      provenance, transaction rollback on partial failure, audit events on success and
-      failure, PII detection (including odd input)
+- [ ] **End-to-end behavior tests** for:
+  - [x] promotion/demotion (found and fixed: promotion duplicated entries, demotion never ran,
+        access counts were lost on non-memory backends)
+  - [x] TTL expiry (found and fixed: `ttl_seconds` was never enforced)
+  - [x] capacity enforcement on store
+  - [ ] compaction with provenance
+  - [ ] transaction rollback on partial failure
+  - [ ] audit events on success and failure
+  - [ ] PII detection (including odd input)
 - [ ] **Concurrency:** Router is single-event-loop only; document it and add a clear guard
       rather than silent corruption
 - [x] **Adapter contract tests:** one shared suite (`tests/contract/`, ~190 cases) run against memory,
