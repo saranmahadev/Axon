@@ -199,8 +199,8 @@ class TestStoreMethod:
         # Verify router was called with entry containing metadata
         call_args = mock_router.route_store.call_args
         entry = call_args[0][0]
-        assert hasattr(entry.metadata, "custom")
-        assert entry.metadata.custom == metadata
+        assert entry.metadata.key == "value"  # custom keys are stored as extra fields
+        assert entry.metadata.number == 42
 
     @pytest.mark.asyncio
     async def test_store_with_importance(
@@ -717,7 +717,7 @@ class TestExportMethod:
 
         mock_adapter = AsyncMock()
         mock_adapter.query = AsyncMock(return_value=[entry1])
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Export
         data = await system.export()
@@ -748,7 +748,7 @@ class TestExportMethod:
         entry = MemoryEntry(id="id1", text="Test", metadata=MemoryMetadata())
         mock_adapter = AsyncMock()
         mock_adapter.query = AsyncMock(return_value=[entry])
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Export specific tier
         await system.export(tier="persistent")
@@ -773,7 +773,7 @@ class TestExportMethod:
 
         mock_adapter = AsyncMock()
         mock_adapter.query = AsyncMock(return_value=[entry])
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Export without embeddings
         data = await system.export(include_embeddings=False)
@@ -801,7 +801,7 @@ class TestExportMethod:
 
         mock_adapter = AsyncMock()
         mock_adapter.query = AsyncMock(return_value=[entry])
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Export with filter
         filter_obj = Filter(min_importance=0.8)
@@ -841,7 +841,7 @@ class TestExportMethod:
         entry = MemoryEntry(id="id1", text="Test", metadata=MemoryMetadata())
         mock_adapter = AsyncMock()
         mock_adapter.query = AsyncMock(return_value=[entry])
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         await system.export()
 
@@ -897,7 +897,7 @@ class TestImportMethod:
         mock_adapter = AsyncMock()
         mock_adapter.get = AsyncMock(side_effect=KeyError)  # Entry doesn't exist
         mock_adapter.save = AsyncMock(return_value="id1")
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Import
         stats = await system.import_from(export_data)
@@ -945,7 +945,7 @@ class TestImportMethod:
         mock_adapter = AsyncMock()
         mock_adapter.get = AsyncMock(return_value=existing_entry)
         mock_adapter.save = AsyncMock()
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Import with overwrite
         stats = await system.import_from(export_data, overwrite=True)
@@ -991,7 +991,7 @@ class TestImportMethod:
         mock_adapter = AsyncMock()
         mock_adapter.get = AsyncMock(return_value=existing_entry)
         mock_adapter.save = AsyncMock()
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Import without overwrite
         stats = await system.import_from(export_data, overwrite=False)
@@ -1035,7 +1035,7 @@ class TestImportMethod:
         mock_adapter = AsyncMock()
         mock_adapter.get = AsyncMock(side_effect=KeyError)
         mock_adapter.save = AsyncMock()
-        mock_registry.get_adapter = Mock(return_value=mock_adapter)
+        mock_registry.get_adapter = AsyncMock(return_value=mock_adapter)
 
         # Import with tier mapping
         tier_mapping = {"ephemeral": "session"}
@@ -1119,7 +1119,7 @@ class TestSyncMethod:
             elif tier == "persistent":
                 return target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         # Sync
         stats = await system.sync(source_tier="session", target_tier="persistent")
@@ -1155,7 +1155,7 @@ class TestSyncMethod:
         def get_adapter_mock(tier):
             return source_adapter if tier == "session" else target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         # Sync with delete
         stats = await system.sync(
@@ -1208,7 +1208,7 @@ class TestSyncMethod:
         def get_adapter_mock(tier):
             return source_adapter if tier == "session" else target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         # Sync with newer wins
         stats = await system.sync(
@@ -1243,7 +1243,7 @@ class TestSyncMethod:
         def get_adapter_mock(tier):
             return source_adapter if tier == "session" else target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         # Sync with target wins
         stats = await system.sync(
@@ -1280,7 +1280,7 @@ class TestSyncMethod:
         def get_adapter_mock(tier):
             return source_adapter if tier == "session" else target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         # Sync with filter
         filter_obj = Filter(min_importance=0.8)
@@ -1353,7 +1353,7 @@ class TestSyncMethod:
         def get_adapter_mock(tier):
             return source_adapter if tier == "session" else target_adapter
 
-        mock_registry.get_adapter = Mock(side_effect=get_adapter_mock)
+        mock_registry.get_adapter = AsyncMock(side_effect=get_adapter_mock)
 
         await system.sync(source_tier="session", target_tier="persistent")
 
@@ -1435,14 +1435,15 @@ class TestCompactMethod:
             policy_engine=mock_policy_engine,
         )
 
-        with pytest.raises(ValueError, match="Invalid compaction strategy"):
+        with pytest.raises(ValueError, match="Unknown strategy"):
             await system.compact(tier="persistent", strategy="invalid")
 
     @pytest.mark.asyncio
-    async def test_compact_unsupported_strategy_raises(
-        self, mock_config, mock_router, mock_registry, mock_policy_engine
+    async def test_compact_semantic_without_openai_key_raises(
+        self, mock_config, mock_router, mock_registry, mock_policy_engine, monkeypatch
     ):
-        """Test that unsupported strategies raise ValueError."""
+        """Semantic compaction needs an LLM summarizer; fail fast with a clear message."""
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
         system = MemorySystem(
             config=mock_config,
             router=mock_router,
@@ -1450,8 +1451,7 @@ class TestCompactMethod:
             policy_engine=mock_policy_engine,
         )
 
-        # semantic, importance, time are valid but not yet implemented
-        with pytest.raises(ValueError, match="not yet implemented"):
+        with pytest.raises(ValueError, match="OpenAI API key"):
             await system.compact(tier="persistent", strategy="semantic")
 
     @pytest.mark.asyncio

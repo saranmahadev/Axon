@@ -62,14 +62,14 @@ class TestMemoryMetadata:
             source="agent",
             tags=["important", "urgent"],
             importance=0.9,
-            privacy_level="private",
+            privacy_level="restricted",
         )
         assert meta.user_id == "user123"
         assert meta.session_id == "session456"
         assert meta.source == "agent"
         assert meta.tags == ["important", "urgent"]
         assert meta.importance == 0.9
-        assert meta.privacy_level == "private"
+        assert meta.privacy_level == PrivacyLevel.RESTRICTED
 
     def test_importance_validation(self):
         """Test importance score validation."""
@@ -333,7 +333,8 @@ class TestEnums:
         """Test PrivacyLevel enum values."""
         assert PrivacyLevel.PUBLIC.value == "public"
         assert PrivacyLevel.SENSITIVE.value == "sensitive"
-        assert PrivacyLevel.PRIVATE.value == "private"
+        assert PrivacyLevel.INTERNAL.value == "internal"
+        assert PrivacyLevel.RESTRICTED.value == "restricted"
 
     def test_source_type_enum(self):
         """Test SourceType enum values."""

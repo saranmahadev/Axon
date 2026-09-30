@@ -327,8 +327,8 @@ class TestAuditLoggerRotation:
             for i in range(6):
                 await logger.log_event(operation=OperationType.STORE, entry_ids=[f"entry_{i}"])
 
-            # Should have exported and cleared
-            assert logger.event_count == 0  # Cleared after export
+            # Rotation fires when the 5th event lands (exported + cleared); the 6th remains
+            assert logger.event_count == 1
             assert export_path.exists()
 
             # Verify exported data
@@ -336,6 +336,20 @@ class TestAuditLoggerRotation:
                 data = json.load(f)
 
             assert len(data) == 5  # First 5 events before rotation
+
+    async def test_rotation_auto_export_keeps_earlier_rotations(self):
+        """Later rotations must append to the export file, not overwrite it."""
+        with TemporaryDirectory() as tmpdir:
+            export_path = Path(tmpdir) / "auto_export.json"
+            logger = AuditLogger(max_events=5, auto_export_path=export_path, enable_rotation=True)
+
+            for i in range(10):  # two full rotations
+                await logger.log_event(operation=OperationType.STORE, entry_ids=[f"entry_{i}"])
+
+            with open(export_path, "r") as f:
+                data = json.load(f)
+
+            assert [e["entry_ids"][0] for e in data] == [f"entry_{i}" for i in range(10)]
 
     async def test_no_rotation_when_disabled(self):
         """Test that rotation doesn't occur when disabled."""

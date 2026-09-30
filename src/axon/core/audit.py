@@ -111,8 +111,12 @@ class AuditLogger:
         Otherwise, removes oldest half of events to make room.
         """
         if self._auto_export_path:
-            # Export to file
-            await self._export_to_file(self._auto_export_path)
+            # Called with self._lock held, so pass a snapshot explicitly: exporting with
+            # events=None would try to re-acquire the (non-reentrant) lock and deadlock.
+            # Append to earlier rotations so a later rotation never overwrites them.
+            await self._export_to_file(
+                self._auto_export_path, list(self._events), append=True
+            )
             self._events.clear()
         else:
             # Keep newest half
@@ -196,13 +200,18 @@ class AuditLogger:
         return len(events)
 
     async def _export_to_file(
-        self, file_path: Path, events: Optional[List[AuditEvent]] = None
+        self,
+        file_path: Path,
+        events: Optional[List[AuditEvent]] = None,
+        append: bool = False,
     ) -> None:
         """Internal method to export events to file.
 
         Args:
             file_path: Path to output file
-            events: Events to export (defaults to all events)
+            events: Events to export (defaults to all events). Callers that already hold
+                ``self._lock`` must pass this, since the lock is not reentrant.
+            append: If True, keep events already present in an existing export file
         """
         if events is None:
             async with self._lock:
@@ -213,6 +222,19 @@ class AuditLogger:
 
         # Ensure parent directory exists
         file_path.parent.mkdir(parents=True, exist_ok=True)
+
+        if append and file_path.exists():
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    existing = json.load(f)
+            except (OSError, json.JSONDecodeError) as e:
+                # Never silently discard audit data; fail loudly instead.
+                raise RuntimeError(
+                    f"Cannot append to existing audit export '{file_path}': {e}"
+                ) from e
+            if not isinstance(existing, list):
+                raise RuntimeError(f"Existing audit export '{file_path}' is not a JSON list")
+            events_dict = existing + events_dict
 
         # Write to file
         with open(file_path, "w", encoding="utf-8") as f:
