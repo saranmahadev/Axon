@@ -238,16 +238,48 @@ class PolicyEngine:
 
         return should_demote, score_details
 
-    def check_overflow(self, tier_name: str) -> tuple[bool, dict[str, Any]]:
+    async def check_overflow_async(self, tier_name: str) -> tuple[bool, dict[str, Any]]:
+        """Check tier overflow using the live entry count from the registry.
+
+        Async counterpart of :meth:`check_overflow` that looks up the current count
+        itself. Prefer this from async code.
+        """
+        policy = self._policies.get(tier_name)
+        if policy is None or policy.max_entries is None:
+            return self.check_overflow(tier_name)
+        stats = await self._registry.get_statistics(tier_name)
+        return self.check_overflow(tier_name, stats["entry_count"])
+
+    async def should_compact_async(
+        self, tier_name: str, current_count: int | None = None
+    ) -> tuple[bool, dict[str, Any]]:
+        """Check compaction using the live entry count from the registry.
+
+        Async counterpart of :meth:`should_compact`; ``current_count`` is looked up
+        when omitted.
+        """
+        policy = self._policies.get(tier_name)
+        if current_count is None and policy is not None and policy.compaction_threshold is not None:
+            current_count = (await self._registry.get_statistics(tier_name))["entry_count"]
+        return self.should_compact(tier_name, current_count)
+
+    def check_overflow(
+        self, tier_name: str, current_count: int | None = None
+    ) -> tuple[bool, dict[str, Any]]:
         """
         Check if tier has exceeded capacity (overflow).
 
         Args:
             tier_name: Name of tier to check
+            current_count: Current entry count. Required when the tier has a
+                max_entries limit; use check_overflow_async to look it up.
 
         Returns:
             Tuple of (is_overflow: bool, details: dict)
             details contains: entry_count, max_entries, overflow_amount
+
+        Raises:
+            ValueError: If the tier has a limit and current_count is not given
 
         Example:
             >>> is_overflow, details = engine.check_overflow("ephemeral")
@@ -272,8 +304,13 @@ class PolicyEngine:
                 "max_entries": None,
             }
 
-        # Get current entry count
-        entry_count = 0  # TODO: Get from registry.get_statistics(tier_name)
+        # Entry counts come from async adapters; sync callers must supply one
+        if current_count is None:
+            raise ValueError(
+                f"current_count is required to check overflow for tier '{tier_name}'; "
+                "use check_overflow_async() to look it up from the registry"
+            )
+        entry_count = current_count
 
         is_overflow = entry_count > policy.max_entries
         overflow_amount = max(0, entry_count - policy.max_entries)
@@ -469,7 +506,8 @@ class PolicyEngine:
 
         Args:
             tier_name: Name of tier to check for compaction
-            current_count: Current entry count (None = query from adapter)
+            current_count: Current entry count (required when the tier has a
+                compaction_threshold; see should_compact_async to look it up)
 
         Returns:
             Tuple of (should_compact: bool, details: dict)
@@ -519,16 +557,11 @@ class PolicyEngine:
                 "reason": reason,
             }
 
-        # Get current entry count
         if current_count is None:
-            try:
-                adapter = self.adapter_registry.get_adapter(tier_name)
-                current_count = adapter.count()
-            except Exception as e:
-                logger.warning(
-                    f"Failed to get count for tier '{tier_name}': {e}. " "Assuming count = 0"
-                )
-                current_count = 0
+            raise ValueError(
+                f"current_count is required to check compaction for tier '{tier_name}'; "
+                "use should_compact_async() to look it up from the registry"
+            )
 
         # Check if threshold is exceeded
         threshold = policy.compaction_threshold

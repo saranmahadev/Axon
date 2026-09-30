@@ -851,6 +851,54 @@ class TestExportMethod:
         assert events[0].result_count == 3  # One entry per tier
 
 
+class TestSilentFailureRegressions:
+    """Failures must be raised or logged, never swallowed (Phase 1 blocker)."""
+
+    @staticmethod
+    def _system(mock_config, mock_router, mock_registry, mock_policy_engine):
+        return MemorySystem(
+            config=mock_config,
+            router=mock_router,
+            registry=mock_registry,
+            policy_engine=mock_policy_engine,
+        )
+
+    @pytest.mark.asyncio
+    async def test_export_raises_when_tier_cannot_be_read(
+        self, mock_config, mock_router, mock_registry, mock_policy_engine
+    ):
+        """An export must not silently omit a tier it failed to read."""
+        system = self._system(mock_config, mock_router, mock_registry, mock_policy_engine)
+        adapter = AsyncMock()
+        adapter.query = AsyncMock(side_effect=RuntimeError("boom"))
+        adapter.list_ids = Mock(side_effect=RuntimeError("list failed"))
+        mock_registry.get_adapter = AsyncMock(return_value=adapter)
+
+        with pytest.raises(RuntimeError, match="Failed to export tier"):
+            await system.export()
+
+    @pytest.mark.asyncio
+    async def test_sync_logs_entries_it_skips(
+        self, mock_config, mock_router, mock_registry, mock_policy_engine, caplog
+    ):
+        system = self._system(mock_config, mock_router, mock_registry, mock_policy_engine)
+        entry = MemoryEntry(id="bad-entry", text="x", embedding=[0.1] * 384)
+        source = AsyncMock()
+        source.query = AsyncMock(return_value=[entry])
+        target = AsyncMock()
+        target.get = AsyncMock(side_effect=KeyError)
+        target.save = AsyncMock(side_effect=RuntimeError("disk full"))
+        mock_registry.get_adapter = AsyncMock(
+            side_effect=lambda tier: source if tier == "session" else target
+        )
+
+        with caplog.at_level("WARNING"):
+            stats = await system.sync(source_tier="session", target_tier="persistent")
+
+        assert stats["skipped"] == 1
+        assert "bad-entry" in caplog.text and "disk full" in caplog.text
+
+
 class TestImportMethod:
     """Test import_from() method functionality."""
 
@@ -1284,9 +1332,7 @@ class TestSyncMethod:
 
         # Sync with filter
         filter_obj = Filter(min_importance=0.8)
-        await system.sync(
-            source_tier="session", target_tier="persistent", filter=filter_obj
-        )
+        await system.sync(source_tier="session", target_tier="persistent", filter=filter_obj)
 
         # Verify filter was passed
         call_args = source_adapter.query.call_args
@@ -1381,7 +1427,7 @@ class TestCompactMethod:
 
         # Mock adapter with low count
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(return_value=100)  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(return_value=100)
         mock_registry.get_adapter.return_value = mock_adapter
 
         # Mock policy engine to say no compaction needed
@@ -1483,7 +1529,7 @@ class TestCompactMethod:
 
         # Mock adapter
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(return_value=200)  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(return_value=200)
         mock_adapter.query.return_value = mock_entries
         mock_registry.get_adapter.return_value = mock_adapter
 
@@ -1553,7 +1599,7 @@ class TestCompactMethod:
 
         # Mock adapter
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(side_effect=[150, 82])  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(side_effect=[150, 82])
         mock_adapter.query.return_value = mock_entries
         mock_adapter.save = AsyncMock()
         mock_adapter.delete = AsyncMock()
@@ -1634,7 +1680,7 @@ class TestCompactMethod:
 
         # Mock adapter
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(side_effect=[120, 21])  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(side_effect=[120, 21])
         mock_adapter.query.return_value = mock_entries
         mock_adapter.save.side_effect = capture_save
         mock_adapter.delete = AsyncMock()
@@ -1712,7 +1758,7 @@ class TestCompactMethod:
 
         # Mock adapter
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(side_effect=[110, 11])  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(side_effect=[110, 11])
         mock_adapter.query.return_value = mock_entries
         mock_adapter.save.side_effect = capture_save
         mock_adapter.delete = AsyncMock()
@@ -1814,7 +1860,7 @@ class TestCompactMethod:
         ]
 
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(side_effect=[120, 21])  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(side_effect=[120, 21])
         mock_adapter.query.return_value = mock_entries
         mock_adapter.save = AsyncMock()
         mock_adapter.delete = AsyncMock()
@@ -1872,7 +1918,7 @@ class TestCompactMethod:
 
         # Mock adapter
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(return_value=150)  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(return_value=150)
         mock_registry.get_adapter.return_value = mock_adapter
 
         # Policy has threshold of 10000 but we override to 100
@@ -1917,7 +1963,7 @@ class TestCompactMethod:
 
         # Mock adapters for all tiers
         mock_adapter = AsyncMock()
-        mock_adapter.count = Mock(return_value=50)  # count() is sync, not async
+        mock_adapter.count_async = AsyncMock(return_value=50)
         mock_registry.get_adapter.return_value = mock_adapter
 
         # Mock all tiers below threshold

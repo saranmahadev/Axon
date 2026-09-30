@@ -13,12 +13,15 @@ Features:
 
 import asyncio
 import json
+import logging
 from datetime import datetime, timezone
 
 from pinecone import Pinecone, ServerlessSpec
 
 from ..models import Filter, MemoryEntry
 from .base import StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class PineconeAdapter(StorageAdapter):
@@ -415,38 +418,46 @@ class PineconeAdapter(StorageAdapter):
             else:
                 # Default namespace
                 return stats.get("total_vector_count", 0)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"Could not count vectors in namespace '{self.namespace}': {e}")
             return 0
 
     async def list_ids_async(self, limit: int = 100) -> list[str]:
         """List vector IDs in the namespace.
 
         Note: Pinecone doesn't have a direct list API, so we use a dummy query.
-        This is a workaround and may not return all IDs for large namespaces.
+        This is a workaround that cannot page, so it raises if the result may be truncated.
 
         Args:
             limit: Maximum number of IDs to return
 
         Returns:
             List of vector IDs
+
+        Raises:
+            RuntimeError: If ``limit`` IDs were returned (the list may be incomplete)
         """
         if self.index is None or self._dimension is None:
             return []
 
-        try:
-            # Query with a dummy vector to get IDs
-            dummy_vector = [0.0] * self._dimension
-            results = self.index.query(
-                vector=dummy_vector,
-                top_k=limit,
-                namespace=self.namespace,
-                include_metadata=False,
-                include_values=False,
-            )
+        # Query with a dummy vector to get IDs
+        dummy_vector = [0.0] * self._dimension
+        results = self.index.query(
+            vector=dummy_vector,
+            top_k=limit,
+            namespace=self.namespace,
+            include_metadata=False,
+            include_values=False,
+        )
 
-            return [match["id"] for match in results.get("matches", [])]
-        except Exception:
-            return []
+        ids = [match["id"] for match in results.get("matches", [])]
+        if len(ids) >= limit:
+            # Callers such as forget(filter=...) need every ID; never return a partial list
+            raise RuntimeError(
+                f"Pinecone can list at most {limit} IDs per call and the namespace may hold "
+                "more. Pass explicit entry IDs instead, or raise `limit`."
+            )
+        return ids
 
     async def clear_async(self) -> None:
         """Delete all vectors in the namespace."""

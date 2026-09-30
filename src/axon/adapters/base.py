@@ -128,6 +128,30 @@ class StorageAdapter(ABC):
         """
         pass
 
+    async def count_async(self) -> int:
+        """Return the number of entries currently stored.
+
+        Used by the policy engine for capacity and compaction decisions. Every
+        adapter should override this; the default fails fast rather than reporting
+        a misleading count.
+
+        Raises:
+            NotImplementedError: If the adapter does not support counting
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement count_async()")
+
+    async def list_ids_async(self) -> list[str]:
+        """Return the IDs of all stored entries.
+
+        Used to enumerate candidates for filter-based deletion (``forget``). The
+        result MUST be complete: a truncated list would silently leave data behind.
+        Adapters that cannot guarantee completeness should raise instead.
+
+        Raises:
+            NotImplementedError: If the adapter does not support listing IDs
+        """
+        raise NotImplementedError(f"{type(self).__name__} does not implement list_ids_async()")
+
     # Optional transaction support methods
     # Adapters that support transactions should override these
 

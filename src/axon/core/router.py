@@ -172,7 +172,12 @@ class Router:
 
         # Check for overflow and handle if policy engine available
         if self.policy_engine:
-            is_overflow, overflow_details = self.policy_engine.check_overflow(tier)
+            try:
+                is_overflow, overflow_details = await self.policy_engine.check_overflow_async(tier)
+            except Exception as e:
+                # A failing capacity check must not block writes, but it must be visible
+                logger.warning(f"Could not check capacity for tier '{tier}': {e}")
+                is_overflow, overflow_details = False, {}
             if is_overflow:
                 logger.warning(
                     f"Tier '{tier}' overflow detected: {overflow_details['overflow_amount']} "
@@ -350,29 +355,64 @@ class Router:
             tiers = list(self.config.tiers.keys())
 
         total_deleted = 0
+        failures: dict[str, Exception] = {}
 
-        # Delete from each tier
+        # Delete from every tier even if one fails, so a single bad backend cannot
+        # leave data behind in the others; failures are reported after the sweep.
         for t in tiers:
             try:
-                adapter = await self.registry.get_adapter(t)
-                deleted = await adapter.delete(entry_id=entry_id, filter=filter)
-                total_deleted += deleted
-                self._tier_stats[t]["forgets"] += deleted
-
-                if deleted > 0:
-                    logger.debug(f"Deleted {deleted} entries from tier '{t}'")
-
+                deleted = await self._forget_in_tier(t, entry_id, filter)
             except Exception as e:
                 logger.error(f"Error deleting from tier '{t}': {e}")
-                # Continue with other tiers
+                failures[t] = e
                 continue
+
+            total_deleted += deleted
+            self._tier_stats[t]["forgets"] += deleted
+            if deleted > 0:
+                logger.debug(f"Deleted {deleted} entries from tier '{t}'")
 
         logger.info(
             f"Forget complete: {total_deleted} entries deleted "
-            f"(entry_id={entry_id}, tiers={tiers})"
+            f"(entry_id={entry_id}, tiers={tiers}, failed_tiers={list(failures)})"
         )
 
+        if failures:
+            details = "; ".join(f"{t}: {e}" for t, e in failures.items())
+            raise RuntimeError(
+                f"Forget incomplete: {total_deleted} entries deleted, but {len(failures)} "
+                f"tier(s) failed ({details})"
+            )
+
         return total_deleted
+
+    async def _forget_in_tier(self, tier: str, entry_id: str | None, filter: Filter | None) -> int:
+        """Delete matching entries from one tier and return how many were removed.
+
+        With ``entry_id`` only that entry is a candidate; with only ``filter`` every entry
+        in the tier is. When both are given, the entry must also match the filter.
+        """
+        adapter = await self.registry.get_adapter(tier)
+
+        if entry_id is not None:
+            candidate_ids = [entry_id]
+        else:
+            candidate_ids = await adapter.list_ids_async()
+
+        deleted = 0
+        for candidate_id in candidate_ids:
+            if filter is not None:
+                try:
+                    entry = await adapter.get(candidate_id)
+                except KeyError:
+                    continue  # Not in this tier (or removed concurrently)
+                if not filter.matches(entry):
+                    continue
+
+            if await adapter.delete(candidate_id):
+                deleted += 1
+
+        return deleted
 
     def _update_access_metadata(self, entry: MemoryEntry) -> None:
         """

@@ -70,11 +70,9 @@ async def integration_registry():
         adapter.query = AsyncMock(side_effect=query)
 
         # Mock delete operation
-        async def delete(entry_id=None, filter=None):
-            if entry_id and entry_id in storage[tier]:
-                del storage[tier][entry_id]
-                return 1
-            return 0
+        async def delete(id):
+            # Mirrors StorageAdapter.delete(id) -> bool
+            return storage[tier].pop(id, None) is not None
 
         adapter.delete = AsyncMock(side_effect=delete)
 
@@ -100,7 +98,7 @@ async def integration_policy_engine(
     engine = Mock(spec=PolicyEngine)
     engine.get_promotion_path = Mock(return_value=None)
     engine.get_demotion_path = Mock(return_value=None)
-    engine.check_overflow = Mock(return_value=(False, {"is_overflow": False}))
+    engine.check_overflow_async = AsyncMock(return_value=(False, {"is_overflow": False}))
     return engine
 
 

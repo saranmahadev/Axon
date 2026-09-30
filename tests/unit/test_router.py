@@ -72,7 +72,7 @@ def mock_policy_engine():
     engine = Mock(spec=PolicyEngine)
     engine.get_promotion_path = Mock(return_value=None)
     engine.get_demotion_path = Mock(return_value=None)
-    engine.check_overflow = Mock(return_value=(False, {"is_overflow": False}))
+    engine.check_overflow_async = AsyncMock(return_value=(False, {"is_overflow": False}))
     return engine
 
 
@@ -213,14 +213,25 @@ class TestRouteStore:
         entry = create_test_entry(importance=0.5)
 
         # Mock overflow condition
-        mock_policy_engine.check_overflow.return_value = (
+        mock_policy_engine.check_overflow_async.return_value = (
             True,
             {"is_overflow": True, "overflow_amount": 5},
         )
 
         await router_with_policy.route_store(entry)
 
-        mock_policy_engine.check_overflow.assert_called_once_with("session")
+        mock_policy_engine.check_overflow_async.assert_called_once_with("session")
+
+    @pytest.mark.asyncio
+    async def test_store_proceeds_when_capacity_check_fails(
+        self, router_with_policy, mock_policy_engine
+    ):
+        """A failing capacity check must not block the write."""
+        mock_policy_engine.check_overflow_async.side_effect = RuntimeError("backend down")
+
+        entry_id = await router_with_policy.route_store(create_test_entry(importance=0.5))
+
+        assert entry_id is not None
 
     @pytest.mark.asyncio
     async def test_store_updates_statistics(self, router):

@@ -305,6 +305,104 @@ class TestCapacityManagement:
         assert "not found in policies" in details["reason"]
 
 
+class TestCapacityWithRealCounts:
+    """Capacity checks must use real entry counts (regression: count was hard-coded to 0)."""
+
+    @staticmethod
+    async def _engine_with_entries(scoring_engine, n_entries, max_entries=3, threshold=None):
+        from axon.adapters.memory import InMemoryAdapter
+
+        registry = AdapterRegistry()
+        adapter = InMemoryAdapter()
+        registry.register("session", "memory", adapter_instance=adapter)
+        for i in range(n_entries):
+            await adapter.save(MemoryEntry(text=f"entry {i}", id=f"id-{i}"))
+        policies = {
+            "session": Policy(
+                tier_name="session",
+                adapter_type="memory",
+                max_entries=max_entries,
+                compaction_threshold=threshold,
+            )
+        }
+        engine = PolicyEngine(
+            registry=registry, scoring_engine=scoring_engine, tier_policies=policies
+        )
+        return engine, registry
+
+    @pytest.mark.asyncio
+    async def test_registry_statistics_reports_live_count(self, scoring_engine):
+        _, registry = await self._engine_with_entries(scoring_engine, 2)
+
+        stats = await registry.get_statistics("session")
+
+        assert stats["entry_count"] == 2
+        assert stats["tier"] == "session"
+
+    @pytest.mark.asyncio
+    async def test_overflow_async_detects_over_capacity(self, scoring_engine):
+        engine, _ = await self._engine_with_entries(scoring_engine, 5, max_entries=3)
+
+        is_overflow, details = await engine.check_overflow_async("session")
+
+        assert is_overflow is True
+        assert details["entry_count"] == 5
+        assert details["overflow_amount"] == 2
+
+    @pytest.mark.asyncio
+    async def test_overflow_async_within_capacity(self, scoring_engine):
+        engine, _ = await self._engine_with_entries(scoring_engine, 3, max_entries=3)
+
+        is_overflow, details = await engine.check_overflow_async("session")
+
+        assert is_overflow is False
+        assert details["entry_count"] == 3
+
+    @pytest.mark.asyncio
+    async def test_should_compact_async_uses_live_count(self, scoring_engine):
+        engine, _ = await self._engine_with_entries(
+            scoring_engine, 10, max_entries=20, threshold=10
+        )
+
+        should_compact, details = await engine.should_compact_async("session")
+
+        assert should_compact is True
+        assert details["current_count"] == 10
+
+    def test_check_overflow_requires_count_when_limited(self, scoring_engine):
+        """Sync callers must pass a count; silently assuming 0 hides overflow."""
+        policies = {"session": Policy(tier_name="session", adapter_type="memory", max_entries=3)}
+        engine = PolicyEngine(
+            registry=Mock(spec=AdapterRegistry),
+            scoring_engine=scoring_engine,
+            tier_policies=policies,
+        )
+
+        with pytest.raises(ValueError, match="current_count is required"):
+            engine.check_overflow("session")
+
+        is_overflow, _ = engine.check_overflow("session", current_count=4)
+        assert is_overflow is True
+
+    def test_should_compact_requires_count_when_threshold_set(self, scoring_engine):
+        policies = {
+            "session": Policy(
+                tier_name="session",
+                adapter_type="memory",
+                max_entries=20,
+                compaction_threshold=10,
+            )
+        }
+        engine = PolicyEngine(
+            registry=Mock(spec=AdapterRegistry),
+            scoring_engine=scoring_engine,
+            tier_policies=policies,
+        )
+
+        with pytest.raises(ValueError, match="current_count is required"):
+            engine.should_compact("session")
+
+
 # ============================================================================
 # Test Tier Path Resolution
 # ============================================================================

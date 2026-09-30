@@ -5,6 +5,7 @@ a high-performance vector search engine. Supports both local and remote instance
 """
 
 import json
+import logging
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
@@ -12,6 +13,8 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 
 from ..models import Filter, MemoryEntry
 from .base import StorageAdapter
+
+logger = logging.getLogger(__name__)
 
 
 class QdrantAdapter(StorageAdapter):
@@ -403,7 +406,9 @@ class QdrantAdapter(StorageAdapter):
         try:
             info = await self.client.get_collection(self.collection_name)
             return info.points_count or 0
-        except Exception:
+        except Exception as e:
+            # A missing collection legitimately counts as empty; anything else is surfaced
+            logger.warning(f"Could not count entries in '{self.collection_name}': {e}")
             return 0
 
     async def clear_async(self) -> None:
@@ -420,17 +425,23 @@ class QdrantAdapter(StorageAdapter):
         Returns:
             List of entry IDs
         """
-        try:
-            # Scroll through all points to get IDs
-            points, _ = await self.client.scroll(
+        if not await self.client.collection_exists(self.collection_name):
+            return []
+
+        # Page through the whole collection; a single scroll would silently truncate
+        ids: list[str] = []
+        offset = None
+        while True:
+            points, offset = await self.client.scroll(
                 collection_name=self.collection_name,
-                limit=10000,  # Adjust based on expected size
+                limit=1000,
+                offset=offset,
                 with_payload=False,
                 with_vectors=False,
             )
-            return [str(p.id) for p in points]
-        except Exception:
-            return []
+            ids.extend(str(p.id) for p in points)
+            if offset is None:
+                return ids
 
     def count(self) -> int:
         """Get total number of entries.

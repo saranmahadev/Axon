@@ -261,6 +261,14 @@ class InMemoryAdapter(StorageAdapter):
         """
         return len(self._storage)
 
+    async def list_ids_async(self) -> list[str]:
+        """Get list of all entry IDs in storage (async)."""
+        return self.list_ids()
+
+    async def count_async(self) -> int:
+        """Get the total number of entries in storage (async)."""
+        return len(self._storage)
+
     def list_ids(self) -> list[str]:
         """Get list of all entry IDs in storage.
 

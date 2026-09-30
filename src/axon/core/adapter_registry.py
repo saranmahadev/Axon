@@ -226,6 +226,27 @@ class AdapterRegistry:
         else:
             raise ValueError(f"Unsupported adapter type: {adapter_type}")
 
+    async def get_statistics(self, tier: str) -> dict[str, Any]:
+        """
+        Get live statistics for a tier.
+
+        Args:
+            tier: Tier name
+
+        Returns:
+            Dict with ``tier``, ``adapter_type`` and ``entry_count``
+
+        Raises:
+            KeyError: If tier not registered
+            NotImplementedError: If the tier's adapter cannot report a count
+        """
+        adapter = await self.get_adapter(tier)
+        return {
+            "tier": tier,
+            "adapter_type": self._adapter_types.get(tier),
+            "entry_count": await adapter.count_async(),
+        }
+
     async def initialize_all(self) -> None:
         """
         Initialize all registered adapters.

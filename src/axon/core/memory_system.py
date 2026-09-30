@@ -342,8 +342,10 @@ class MemorySystem:
                     "tags": tags or [],
                     "tier": tier,
                     "has_embedding": entry.embedding is not None,
+                    # privacy_level may be a PrivacyLevel enum or a plain string
                     "privacy_level": (
-                        entry.metadata.privacy_level.value if entry.metadata.privacy_level else None
+                        getattr(entry.metadata.privacy_level, "value", entry.metadata.privacy_level)
+                        or None
                     ),
                 }
                 # Add PII detection info if available
@@ -390,6 +392,100 @@ class MemorySystem:
                 )
 
             raise
+
+    async def forget(
+        self,
+        entry_id: str | None = None,
+        filter: Filter | None = None,
+        tier: str | None = None,
+    ) -> int:
+        """
+        Permanently delete memories by ID and/or filter.
+
+        Every tier is searched unless ``tier`` is given. If deletion fails in any tier,
+        the remaining tiers are still processed and a ``RuntimeError`` is raised afterwards,
+        so a partial erasure is never reported as success. The operation is audit-logged
+        (success or failure) when an audit logger is configured.
+
+        Args:
+            entry_id: ID of a single entry to delete
+            filter: Delete entries matching this filter (e.g. ``Filter(user_id="u1")``).
+                Combined with ``entry_id``, the entry must also match the filter.
+            tier: Restrict deletion to one tier (default: all tiers)
+
+        Returns:
+            Number of entries deleted
+
+        Raises:
+            ValueError: If neither ``entry_id`` nor ``filter`` is provided
+            KeyError: If ``tier`` is not configured
+            RuntimeError: If deletion failed in one or more tiers
+
+        Example:
+            ```python
+            await system.forget("entry-uuid")
+            deleted = await system.forget(filter=Filter(user_id="user_123"))
+            ```
+        """
+        start_time = datetime.now()
+        audit_metadata: dict[str, Any] = {
+            "tier": tier,
+            "by_id": entry_id is not None,
+            "filter": filter.model_dump(mode="json", exclude_defaults=True) if filter else None,
+        }
+
+        try:
+            deleted = await self.router.route_forget(entry_id=entry_id, filter=filter, tier=tier)
+        except Exception as e:
+            duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+            self._log_trace(
+                TraceEvent(
+                    timestamp=start_time,
+                    operation="forget",
+                    duration_ms=duration_ms,
+                    entry_id=entry_id,
+                    tier=tier,
+                    success=False,
+                    error=str(e),
+                )
+            )
+            if self.audit_logger:
+                await self.audit_logger.log_event(
+                    operation=OperationType.FORGET,
+                    user_id=filter.user_id if filter else None,
+                    session_id=filter.session_id if filter else None,
+                    entry_ids=[entry_id] if entry_id else [],
+                    metadata={**audit_metadata, "error_type": type(e).__name__},
+                    status=EventStatus.FAILURE,
+                    error_message=str(e),
+                    duration_ms=duration_ms,
+                )
+            raise
+
+        duration_ms = (datetime.now() - start_time).total_seconds() * 1000
+        self._log_trace(
+            TraceEvent(
+                timestamp=start_time,
+                operation="forget",
+                duration_ms=duration_ms,
+                entry_id=entry_id,
+                tier=tier,
+                result_count=deleted,
+                success=True,
+            )
+        )
+        if self.audit_logger:
+            await self.audit_logger.log_event(
+                operation=OperationType.FORGET,
+                user_id=filter.user_id if filter else None,
+                session_id=filter.session_id if filter else None,
+                entry_ids=[entry_id] if entry_id and deleted else [],
+                metadata={**audit_metadata, "deleted_count": deleted},
+                status=EventStatus.SUCCESS,
+                duration_ms=duration_ms,
+            )
+
+        return deleted
 
     async def recall(
         self,
@@ -730,8 +826,11 @@ class MemorySystem:
                     k=100000,  # Very large number to get all
                     filter=filter,
                 )
-            except Exception:
-                pass  # Will fall through to list_ids approach
+            except Exception as e:
+                logger.warning(
+                    f"Query failed while exporting tier '{tier_name}': {e}. "
+                    "Falling back to listing IDs"
+                )
 
             # If query returned nothing (e.g., no embeddings), try listing all IDs
             if not entries:
@@ -745,9 +844,9 @@ class MemorySystem:
                                 entries.append(entry)
                         except KeyError:
                             continue
-                except Exception:
-                    # If list_ids also fails, just use empty list
-                    pass
+                except Exception as e:
+                    # An export that silently omits a tier looks like a valid backup
+                    raise RuntimeError(f"Failed to export tier '{tier_name}': {e}") from e
 
             stats_by_tier[tier_name] = len(entries)
 
@@ -1157,7 +1256,11 @@ class MemorySystem:
                 else:
                     skipped += 1
 
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    f"Skipped syncing entry '{entry.id}' from '{source_tier}' "
+                    f"to '{target_tier}': {e}"
+                )
                 skipped += 1
                 continue
 
@@ -1167,8 +1270,11 @@ class MemorySystem:
                 try:
                     await source_adapter.delete(entry_id)
                     deleted += 1
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning(
+                        f"Entry '{entry_id}' was copied to '{target_tier}' but could not be "
+                        f"deleted from '{source_tier}': {e}"
+                    )
 
         # Build result
         result = {"synced": synced, "skipped": skipped, "deleted": deleted, "conflicts": conflicts}
@@ -1356,7 +1462,7 @@ class MemorySystem:
             # Check all tiers
             for tier_name in self.config.tiers.keys():
                 adapter = await self.registry.get_adapter(tier_name)
-                current_count = adapter.count()
+                current_count = await adapter.count_async()
                 should_compact, details = self.policy_engine.should_compact(
                     tier_name, current_count
                 )
@@ -1427,7 +1533,7 @@ class MemorySystem:
                     continue  # Skip if no threshold
 
             # Get current count
-            current_count = adapter.count()
+            current_count = await adapter.count_async()
             total_before += current_count
 
             # Check if compaction is needed
@@ -1546,7 +1652,7 @@ class MemorySystem:
                         logger.error(f"Failed to save summary entry: {e}")
 
             # Update count
-            new_count = adapter.count()
+            new_count = await adapter.count_async()
             total_after += new_count
 
         # Calculate statistics

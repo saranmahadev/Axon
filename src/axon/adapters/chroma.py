@@ -456,6 +456,14 @@ class ChromaAdapter(StorageAdapter):
         """
         return self.collection.count()
 
+    async def list_ids_async(self) -> list[str]:
+        """List all entry IDs in collection (async)."""
+        return self.list_ids()
+
+    async def count_async(self) -> int:
+        """Get total number of entries in collection (async)."""
+        return self.count()
+
     def clear(self) -> None:
         """Delete all entries from collection.
 
