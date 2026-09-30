@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from ..errors import EntryNotFoundError
 from .base import StorageAdapter
 
 if TYPE_CHECKING:
@@ -198,7 +199,7 @@ class InMemoryAdapter(StorageAdapter):
             KeyError: If entry with given ID does not exist
         """
         if id not in self._storage:
-            raise KeyError(f"Entry with id '{id}' not found")
+            raise EntryNotFoundError(id, f"Entry with id '{id}' not found")
         return self._storage[id]
 
     async def delete(self, id: str) -> bool:

@@ -4,17 +4,37 @@ This adapter provides persistent vector storage using Qdrant,
 a high-performance vector search engine. Supports both local and remote instances.
 """
 
+import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 from qdrant_client import AsyncQdrantClient, models
 from qdrant_client.models import Distance, PointStruct, VectorParams
 
+from ..errors import AdapterError, EntryNotFoundError
 from ..models import Filter, MemoryEntry
+from ._serialization import extra_metadata_from_json, extra_metadata_to_json
 from .base import StorageAdapter
 
 logger = logging.getLogger(__name__)
+
+# Fixed namespace so non-UUID entry ids map to the same Qdrant point id every time
+_ID_NAMESPACE = uuid.UUID("6f0d3a3e-8f6b-4c1e-9a55-0a5e5d3d7a11")
+
+
+def _point_id(entry_id: str) -> str:
+    """Map an entry id to a Qdrant point id.
+
+    Qdrant only accepts UUIDs or unsigned ints, but Axon lets callers choose any string
+    id. UUIDs pass through; anything else maps deterministically via UUIDv5. The original
+    id is stored in the payload (``entry_id``) and restored on read.
+    """
+    try:
+        return str(uuid.UUID(entry_id))
+    except (ValueError, AttributeError, TypeError):
+        return str(uuid.uuid5(_ID_NAMESPACE, str(entry_id)))
 
 
 class QdrantAdapter(StorageAdapter):
@@ -113,6 +133,10 @@ class QdrantAdapter(StorageAdapter):
 
         # Build payload with all metadata
         payload = {
+            "entry_id": entry.id,
+            "type": entry.type,
+            "version": entry.metadata.version,
+            "extra_metadata": extra_metadata_to_json(entry.metadata),
             "text": entry.text,
             "source": entry.metadata.source,
             "privacy_level": entry.metadata.privacy_level,
@@ -126,7 +150,7 @@ class QdrantAdapter(StorageAdapter):
             ),
         }
 
-        return PointStruct(id=entry.id, vector=entry.embedding, payload=payload)
+        return PointStruct(id=_point_id(entry.id), vector=entry.embedding, payload=payload)
 
     def _point_to_entry(self, point: Any) -> MemoryEntry:
         """Convert Qdrant point to MemoryEntry.
@@ -161,11 +185,14 @@ class QdrantAdapter(StorageAdapter):
             importance=payload.get("importance", 0.5),
             created_at=datetime.fromtimestamp(payload["created_at"], tz=timezone.utc),
             tags=payload.get("tags", []),
+            version=payload.get("version", ""),
             provenance=provenance,
+            **extra_metadata_from_json(payload.get("extra_metadata")),
         )
 
         return MemoryEntry(
-            id=str(point.id),
+            id=payload.get("entry_id") or str(point.id),
+            type=payload.get("type", "note"),
             text=payload["text"],
             embedding=point.vector if hasattr(point, "vector") else None,
             metadata=metadata,
@@ -258,15 +285,20 @@ class QdrantAdapter(StorageAdapter):
 
         return models.Filter(must=conditions)
 
-    async def save(self, entry: MemoryEntry) -> None:
-        """Save a memory entry to Qdrant.
+    async def save(self, entry: MemoryEntry) -> str:
+        """Save (upsert) a memory entry to Qdrant.
 
         Args:
             entry: Memory entry to save
 
+        Returns:
+            The ID of the saved entry
+
         Raises:
-            ValueError: If entry has no embedding
+            ValueError: If entry is None or has no embedding
         """
+        if entry is None:
+            raise ValueError("Entry cannot be None")
         if entry.embedding is None:
             raise ValueError(f"Entry {entry.id} must have an embedding")
 
@@ -276,98 +308,125 @@ class QdrantAdapter(StorageAdapter):
         # Convert and upsert
         point = self._entry_to_point(entry)
         await self.client.upsert(collection_name=self.collection_name, points=[point])
+        return entry.id
 
     async def query(
-        self, embedding: list[float], filter: Filter | None = None, limit: int = 10
+        self,
+        vector: list[float],
+        k: int = 5,
+        filter: Filter | None = None,
     ) -> list[MemoryEntry]:
         """Query for similar memories by vector similarity.
 
         Args:
-            embedding: Query embedding vector
+            vector: Query embedding vector
+            k: Maximum number of results
             filter: Optional filter conditions
-            limit: Maximum number of results
 
         Returns:
-            List of matching memory entries, ordered by similarity
+            List of matching memory entries, most similar first
+
+        Raises:
+            ValueError: If vector is empty or k is not positive
         """
+        if not vector:
+            raise ValueError("Query vector cannot be empty")
+        if k <= 0:
+            raise ValueError("k must be positive")
+
         # Ensure collection exists
-        await self._ensure_collection(len(embedding))
+        await self._ensure_collection(len(vector))
 
         # Convert filter
         qdrant_filter = self._filter_to_qdrant(filter) if filter else None
 
-        # Search using query_points (new API)
         results = await self.client.query_points(
             collection_name=self.collection_name,
-            query=embedding,
+            query=vector,
             query_filter=qdrant_filter,
-            limit=limit,
+            limit=k,
             with_payload=True,
             with_vectors=True,
         )
 
-        # Convert results - query_points returns QueryResponse with points attribute
         return [self._point_to_entry(point) for point in results.points]
 
-    async def get(self, entry_id: str) -> MemoryEntry | None:
+    async def get(self, id: str) -> MemoryEntry:
         """Retrieve a specific memory entry by ID.
 
         Args:
-            entry_id: Memory entry ID
+            id: Memory entry ID
 
         Returns:
-            Memory entry if found, None otherwise
+            The memory entry
+
+        Raises:
+            KeyError: If the entry does not exist. Backend errors propagate unchanged
+                so an outage is never mistaken for a missing entry.
         """
-        try:
-            points = await self.client.retrieve(
-                collection_name=self.collection_name,
-                ids=[entry_id],
-                with_payload=True,
-                with_vectors=True,
-            )
+        if not await self.client.collection_exists(self.collection_name):
+            raise EntryNotFoundError(id)
 
-            if not points:
-                return None
+        points = await self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=[_point_id(id)],
+            with_payload=True,
+            with_vectors=True,
+        )
+        if not points:
+            raise EntryNotFoundError(id)
 
-            return self._point_to_entry(points[0])
-        except Exception:
-            return None
+        return self._point_to_entry(points[0])
 
-    async def delete(self, entry_id: str) -> bool:
+    async def delete(self, id: str) -> bool:
         """Delete a memory entry.
 
         Args:
-            entry_id: Memory entry ID
+            id: Memory entry ID
 
         Returns:
-            True if deleted, False if not found
-        """
-        try:
-            # First check if entry exists
-            existing = await self.get(entry_id)
-            if not existing:
-                return False
+            True if the entry was deleted, False if it did not exist
 
-            # Delete the entry
-            result = await self.client.delete(
-                collection_name=self.collection_name,
-                points_selector=models.PointIdsList(points=[entry_id]),
-            )
-            return result.status == models.UpdateStatus.COMPLETED
-        except Exception:
+        Raises:
+            RuntimeError: If Qdrant does not confirm the deletion. Backend errors
+                propagate unchanged, so callers such as forget() never mistake an
+                outage for "nothing to delete".
+        """
+        if not await self.client.collection_exists(self.collection_name):
             return False
 
-    async def bulk_save(self, entries: list[MemoryEntry]) -> None:
+        point_id = _point_id(id)
+        existing = await self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=[point_id],
+            with_payload=False,
+            with_vectors=False,
+        )
+        if not existing:
+            return False
+
+        result = await self.client.delete(
+            collection_name=self.collection_name,
+            points_selector=models.PointIdsList(points=[point_id]),
+        )
+        if result.status != models.UpdateStatus.COMPLETED:
+            raise AdapterError(f"Qdrant did not confirm deletion of '{id}': {result.status}")
+        return True
+
+    async def bulk_save(self, entries: list[MemoryEntry]) -> list[str]:
         """Save multiple memory entries in a single batch.
 
         Args:
             entries: List of memory entries to save
 
+        Returns:
+            List of IDs for the saved entries (in the same order)
+
         Raises:
-            ValueError: If any entry has no embedding
+            ValueError: If entries is empty or any entry has no embedding
         """
         if not entries:
-            return
+            raise ValueError("Entries list cannot be empty")
 
         # Validate all have embeddings
         for entry in entries:
@@ -377,11 +436,10 @@ class QdrantAdapter(StorageAdapter):
         # Ensure collection exists
         await self._ensure_collection(len(entries[0].embedding))
 
-        # Convert all entries
-        points = [self._entry_to_point(entry) for entry in entries]
-
         # Batch upsert
+        points = [self._entry_to_point(entry) for entry in entries]
         await self.client.upsert(collection_name=self.collection_name, points=points)
+        return [entry.id for entry in entries]
 
     async def reindex(self) -> None:
         """Rebuild vector index.
@@ -413,11 +471,9 @@ class QdrantAdapter(StorageAdapter):
 
     async def clear_async(self) -> None:
         """Clear all entries from storage (async version)."""
-        try:
+        if await self.client.collection_exists(self.collection_name):
             await self.client.delete_collection(self.collection_name)
-            self._embedding_dim = None
-        except Exception:
-            pass
+        self._embedding_dim = None
 
     async def list_ids_async(self) -> list[str]:
         """List all entry IDs (async version).
@@ -436,149 +492,62 @@ class QdrantAdapter(StorageAdapter):
                 collection_name=self.collection_name,
                 limit=1000,
                 offset=offset,
-                with_payload=False,
+                with_payload=["entry_id"],
                 with_vectors=False,
             )
-            ids.extend(str(p.id) for p in points)
+            ids.extend((p.payload or {}).get("entry_id") or str(p.id) for p in points)
             if offset is None:
                 return ids
 
-    def count(self) -> int:
-        """Get total number of entries.
+    @staticmethod
+    def _run_sync(coro: Any, name: str) -> Any:
+        """Run a coroutine to completion from synchronous code.
 
-        Returns:
-            Number of entries in storage
+        Raises:
+            RuntimeError: If called while an event loop is running in this thread
         """
-        import asyncio
-
-        async def _count():
-            try:
-                info = await self.client.get_collection(self.collection_name)
-                return info.points_count or 0
-            except Exception:
-                return 0
-
         try:
             asyncio.get_running_loop()
-            # Already in async context, can't use run_until_complete
-            raise RuntimeError(
-                "count() cannot be called from async context, use await count_async()"
-            )
         except RuntimeError:
-            # Not in async context, safe to create new loop
-            return asyncio.run(_count())
+            return asyncio.run(coro)
+        coro.close()  # avoid a "coroutine was never awaited" warning
+        raise RuntimeError(f"{name}() cannot be called from async context; use the async method")
+
+    def count(self) -> int:
+        """Get total number of entries (synchronous; see count_async)."""
+        return self._run_sync(self.count_async(), "count")
 
     def clear(self) -> None:
-        """Clear all entries from storage."""
-        import asyncio
-
-        async def _clear():
-            try:
-                await self.client.delete_collection(self.collection_name)
-                self._embedding_dim = None
-            except Exception:
-                pass
-
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("clear() cannot be called from async context")
-        except RuntimeError:
-            asyncio.run(_clear())
+        """Clear all entries from storage (synchronous; see clear_async)."""
+        self._run_sync(self.clear_async(), "clear")
 
     def list_ids(self) -> list[str]:
-        """List all entry IDs.
-
-        Returns:
-            List of entry IDs
-        """
-        import asyncio
-
-        async def _list_ids():
-            try:
-                # Scroll through all points to get IDs
-                points, _ = await self.client.scroll(
-                    collection_name=self.collection_name,
-                    limit=10000,  # Adjust based on expected size
-                    with_payload=False,
-                    with_vectors=False,
-                )
-                return [str(p.id) for p in points]
-            except Exception:
-                return []
-
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("list_ids() cannot be called from async context")
-        except RuntimeError:
-            return asyncio.run(_list_ids())
+        """List all entry IDs (synchronous; see list_ids_async)."""
+        return self._run_sync(self.list_ids_async(), "list_ids")
 
     # Sync wrappers for compatibility
-    def save_sync(self, entry: MemoryEntry) -> None:
+    def save_sync(self, entry: MemoryEntry) -> str:
         """Synchronous wrapper for save()."""
-        import asyncio
-
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("save_sync() cannot be called from async context, use await save()")
-        except RuntimeError:
-            asyncio.run(self.save(entry))
+        return self._run_sync(self.save(entry), "save_sync")
 
     def query_sync(
-        self, embedding: list[float], filter: Filter | None = None, limit: int = 10
+        self, vector: list[float], k: int = 5, filter: Filter | None = None
     ) -> list[MemoryEntry]:
         """Synchronous wrapper for query()."""
-        import asyncio
+        return self._run_sync(self.query(vector, k, filter), "query_sync")
 
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError(
-                "query_sync() cannot be called from async context, use await query()"
-            )
-        except RuntimeError:
-            return asyncio.run(self.query(embedding, filter, limit))
-
-    def get_sync(self, entry_id: str) -> MemoryEntry | None:
+    def get_sync(self, id: str) -> MemoryEntry:
         """Synchronous wrapper for get()."""
-        import asyncio
+        return self._run_sync(self.get(id), "get_sync")
 
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError("get_sync() cannot be called from async context, use await get()")
-        except RuntimeError:
-            return asyncio.run(self.get(entry_id))
-
-    def delete_sync(self, entry_id: str) -> bool:
+    def delete_sync(self, id: str) -> bool:
         """Synchronous wrapper for delete()."""
-        import asyncio
+        return self._run_sync(self.delete(id), "delete_sync")
 
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError(
-                "delete_sync() cannot be called from async context, use await delete()"
-            )
-        except RuntimeError:
-            return asyncio.run(self.delete(entry_id))
-
-    def bulk_save_sync(self, entries: list[MemoryEntry]) -> None:
+    def bulk_save_sync(self, entries: list[MemoryEntry]) -> list[str]:
         """Synchronous wrapper for bulk_save()."""
-        import asyncio
-
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError(
-                "bulk_save_sync() cannot be called from async context, use await bulk_save()"
-            )
-        except RuntimeError:
-            asyncio.run(self.bulk_save(entries))
+        return self._run_sync(self.bulk_save(entries), "bulk_save_sync")
 
     def reindex_sync(self) -> None:
         """Synchronous wrapper for reindex()."""
-        import asyncio
-
-        try:
-            asyncio.get_running_loop()
-            raise RuntimeError(
-                "reindex_sync() cannot be called from async context, use await reindex()"
-            )
-        except RuntimeError:
-            asyncio.run(self.reindex())
+        self._run_sync(self.reindex(), "reindex_sync")

@@ -23,6 +23,7 @@ from axon.core.privacy import PIIDetector
 from axon.core.router import Router
 from axon.core.scoring import ScoringEngine
 from axon.core.transaction import IsolationLevel, TransactionCoordinator
+from axon.errors import AdapterError, AuditError, ConfigurationError
 from axon.models.audit import EventStatus, OperationType
 from axon.models.entry import MemoryEntry, MemoryMetadata
 from axon.models.filter import Filter
@@ -134,11 +135,11 @@ class MemorySystem:
             ValueError: If config is invalid or missing required tiers
         """
         if not config:
-            raise ValueError("config is required")
+            raise ConfigurationError("config is required")
 
         # At least persistent tier must be configured
         if not config.persistent:
-            raise ValueError("config must define at least a persistent tier")
+            raise ConfigurationError("config must define at least a persistent tier")
 
         self.config = config
         self.embedder = embedder
@@ -846,7 +847,9 @@ class MemorySystem:
                             continue
                 except Exception as e:
                     # An export that silently omits a tier looks like a valid backup
-                    raise RuntimeError(f"Failed to export tier '{tier_name}': {e}") from e
+                    raise AdapterError(
+                        f"Failed to export tier '{tier_name}': {e}", tier=tier_name
+                    ) from e
 
             stats_by_tier[tier_name] = len(entries)
 
@@ -1902,7 +1905,7 @@ class MemorySystem:
             ```
         """
         if not self.audit_logger:
-            raise RuntimeError(
+            raise AuditError(
                 "No audit logger configured. Initialize MemorySystem with audit_logger parameter."
             )
 

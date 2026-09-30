@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from sentence_transformers import SentenceTransformer
 
+from ..errors import EmbeddingError
 from .base import Embedder
 from .cache import get_global_cache
 
@@ -112,7 +113,7 @@ class SentenceTransformerEmbedder(Embedder):
             return embedding_list
 
         except Exception as e:
-            raise RuntimeError(f"Sentence Transformer embedding failed: {str(e)}") from e
+            raise EmbeddingError(f"Sentence Transformer embedding failed: {str(e)}") from e
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts efficiently.
@@ -175,7 +176,7 @@ class SentenceTransformerEmbedder(Embedder):
                         self._cache.put(text, self._model_name, embedding_list)
 
             except Exception as e:
-                raise RuntimeError(f"Sentence Transformer batch embedding failed: {str(e)}") from e
+                raise EmbeddingError(f"Sentence Transformer batch embedding failed: {str(e)}") from e
 
         # Type assertion (all should be filled now)
         return [e for e in embeddings if e is not None]

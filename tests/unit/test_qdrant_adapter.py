@@ -1,12 +1,14 @@
 """Unit tests for Qdrant vector storage adapter.
 
 Tests cover all StorageAdapter interface methods plus Qdrant-specific features.
-Requires Qdrant running at localhost:6333 (use Docker).
+Runs against an in-process Qdrant by default (no server needed). Set
+AXON_TEST_QDRANT_URL (e.g. http://localhost:6333) to run against a real server.
 
 Run with: pytest tests/unit/test_qdrant_adapter.py -v
 """
 
 import asyncio
+import os
 import time
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
@@ -14,8 +16,8 @@ from uuid import uuid4
 import pytest
 import pytest_asyncio
 
-from src.axon.adapters.qdrant import QdrantAdapter
-from src.axon.models import DateRange, Filter, MemoryEntry, MemoryMetadata, ProvenanceEvent
+from axon.adapters.qdrant import QdrantAdapter
+from axon.models import DateRange, Filter, MemoryEntry, MemoryMetadata, ProvenanceEvent
 
 # Fixtures
 
@@ -24,9 +26,11 @@ from src.axon.models import DateRange, Filter, MemoryEntry, MemoryMetadata, Prov
 async def qdrant_adapter():
     """Create a Qdrant adapter with a unique collection for testing."""
     collection_name = f"test_collection_{uuid4().hex[:8]}"
-    adapter = QdrantAdapter(
-        url="http://localhost:6333", collection_name=collection_name, timeout=10
-    )
+    url = os.environ.get("AXON_TEST_QDRANT_URL")
+    if url:
+        adapter = QdrantAdapter(url=url, collection_name=collection_name, timeout=10)
+    else:
+        adapter = QdrantAdapter(url=None, location=":memory:", collection_name=collection_name)
 
     yield adapter
 
@@ -72,7 +76,7 @@ def sample_entries():
             embedding=[float(i) * 0.1] * 384,
             metadata=MemoryMetadata(
                 source="app",
-                privacy_level="public" if i % 2 == 0 else "private",
+                privacy_level="public" if i % 2 == 0 else "internal",
                 importance=0.5 + (i * 0.1),
                 tags=[f"tag{i}"],
                 provenance=[ProvenanceEvent(action="store", by="test_suite")],
@@ -198,9 +202,7 @@ class TestQdrantQuery:
 
         # Query with last entry's embedding (most distinct: [0.4, 0.4, ...])
         query_embedding = sample_entries[4].embedding
-        results = await qdrant_adapter.query(
-            query_embedding, limit=5
-        )  # Get all 5 to ensure we find it
+        results = await qdrant_adapter.query(query_embedding, k=5)  # Get all 5 to ensure we find it
 
         assert len(results) <= 5
         assert len(results) > 0
@@ -216,7 +218,7 @@ class TestQdrantQuery:
         """Test query respects limit parameter."""
         await qdrant_adapter.bulk_save(sample_entries)
 
-        results = await qdrant_adapter.query(sample_entries[0].embedding, limit=2)
+        results = await qdrant_adapter.query(sample_entries[0].embedding, k=2)
         assert len(results) <= 2
 
     @pytest.mark.asyncio
@@ -231,9 +233,7 @@ class TestQdrantQuery:
 
         # Query with user filter
         filter_obj = Filter(user_id="alice")
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         # All results should be from alice
         assert all(r.metadata.user_id == "alice" for r in results)
@@ -248,9 +248,7 @@ class TestQdrantQuery:
         await qdrant_adapter.bulk_save(sample_entries)
 
         filter_obj = Filter(session_id="session1")
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         assert all(r.metadata.session_id == "session1" for r in results)
 
@@ -260,9 +258,7 @@ class TestQdrantQuery:
         await qdrant_adapter.bulk_save(sample_entries)
 
         filter_obj = Filter(privacy_level="public")
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         assert all(r.metadata.privacy_level == "public" for r in results)
 
@@ -276,9 +272,7 @@ class TestQdrantQuery:
         await qdrant_adapter.bulk_save(sample_entries)
 
         filter_obj = Filter(tags=["python"])
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         # All results should have "python" tag
         assert all("python" in r.metadata.tags for r in results)
@@ -289,9 +283,7 @@ class TestQdrantQuery:
         await qdrant_adapter.bulk_save(sample_entries)
 
         filter_obj = Filter(min_importance=0.7)
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         assert all(r.metadata.importance >= 0.7 for r in results)
 
@@ -308,9 +300,7 @@ class TestQdrantQuery:
 
         # Query for entries in last 7 days
         filter_obj = Filter(date_range=DateRange(start=now - timedelta(days=7), end=now))
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         # Should get entries from 5 and 2 days ago
         assert len(results) >= 2
@@ -321,7 +311,7 @@ class TestQdrantQuery:
         # Ensure collection exists but is empty
         await qdrant_adapter._ensure_collection(384)
 
-        results = await qdrant_adapter.query([0.1] * 384, limit=10)
+        results = await qdrant_adapter.query([0.1] * 384, k=10)
         assert len(results) == 0
 
 
@@ -339,9 +329,9 @@ class TestQdrantGet:
 
     @pytest.mark.asyncio
     async def test_get_nonexistent(self, qdrant_adapter):
-        """Test retrieving non-existent entry returns None."""
-        result = await qdrant_adapter.get("nonexistent-id")
-        assert result is None
+        """Test retrieving non-existent entry raises KeyError (StorageAdapter contract)."""
+        with pytest.raises(KeyError):
+            await qdrant_adapter.get("nonexistent-id")
 
     @pytest.mark.asyncio
     async def test_get_includes_embedding(self, qdrant_adapter, sample_entry):
@@ -366,8 +356,8 @@ class TestQdrantDelete:
         assert result is True
 
         # Verify it's gone
-        retrieved = await qdrant_adapter.get(sample_entry.id)
-        assert retrieved is None
+        with pytest.raises(KeyError):
+            await qdrant_adapter.get(sample_entry.id)
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent(self, qdrant_adapter):
@@ -418,9 +408,9 @@ class TestQdrantBulkOperations:
 
     @pytest.mark.asyncio
     async def test_bulk_save_empty_list(self, qdrant_adapter):
-        """Test bulk save with empty list."""
-        await qdrant_adapter.bulk_save([])
-        # Should not raise error
+        """Test bulk save with empty list raises (StorageAdapter contract)."""
+        with pytest.raises(ValueError):
+            await qdrant_adapter.bulk_save([])
 
     @pytest.mark.asyncio
     async def test_bulk_save_without_embeddings_raises_error(self, qdrant_adapter):
@@ -511,17 +501,22 @@ class TestQdrantUtilities:
 class TestQdrantPersistence:
     """Test data persistence across adapter instances."""
 
+    @pytest.mark.skipif(
+        not os.environ.get("AXON_TEST_QDRANT_URL"),
+        reason="needs a real Qdrant server (set AXON_TEST_QDRANT_URL); in-process mode is per-client",
+    )
     @pytest.mark.asyncio
     async def test_persistence_across_instances(self, sample_entries):
         """Test that data persists across adapter instances."""
         collection_name = f"test_persist_{uuid4().hex[:8]}"
 
         # Create first adapter and save data
-        adapter1 = QdrantAdapter(collection_name=collection_name)
+        url = os.environ["AXON_TEST_QDRANT_URL"]
+        adapter1 = QdrantAdapter(url=url, collection_name=collection_name)
         await adapter1.bulk_save(sample_entries)
 
         # Create second adapter with same collection
-        adapter2 = QdrantAdapter(collection_name=collection_name)
+        adapter2 = QdrantAdapter(url=url, collection_name=collection_name)
 
         # Verify data is accessible
         for entry in sample_entries:
@@ -605,11 +600,50 @@ class TestQdrantEdgeCases:
 
         filter_obj = Filter(privacy_level="public", min_importance=0.6, tags=["tag0"])
 
-        results = await qdrant_adapter.query(
-            sample_entries[0].embedding, filter=filter_obj, limit=10
-        )
+        results = await qdrant_adapter.query(sample_entries[0].embedding, filter=filter_obj, k=10)
 
         # Verify all conditions are met
         for result in results:
             assert result.metadata.privacy_level == "public"
             assert result.metadata.importance >= 0.6
+
+
+class TestQdrantSyncBehavior:
+    """The sync helpers must work outside an event loop and refuse to run inside one."""
+
+    def test_sync_count_and_clear_outside_event_loop(self):
+        adapter = QdrantAdapter(url=None, location=":memory:", collection_name="sync_test")
+
+        assert adapter.count() == 0
+        adapter.clear()  # nothing to clear; must not raise
+
+    @pytest.mark.asyncio
+    async def test_sync_helpers_raise_inside_event_loop(self):
+        adapter = QdrantAdapter(url=None, location=":memory:", collection_name="sync_test")
+
+        with pytest.raises(RuntimeError, match="cannot be called from async context"):
+            adapter.count()
+        with pytest.raises(RuntimeError, match="cannot be called from async context"):
+            adapter.get_sync("x")
+
+
+class TestQdrantIdMapping:
+    """Qdrant only accepts UUID point ids; other string ids must still round-trip."""
+
+    @pytest.mark.asyncio
+    async def test_non_uuid_id_round_trips_and_lists_original_id(self, qdrant_adapter):
+        entry = MemoryEntry(id="my-custom-id", text="hi", embedding=[0.1] * 4)
+
+        assert await qdrant_adapter.save(entry) == "my-custom-id"
+
+        assert (await qdrant_adapter.get("my-custom-id")).id == "my-custom-id"
+        assert await qdrant_adapter.list_ids_async() == ["my-custom-id"]
+        assert await qdrant_adapter.delete("my-custom-id") is True
+
+    @pytest.mark.asyncio
+    async def test_distinct_non_uuid_ids_do_not_collide(self, qdrant_adapter):
+        await qdrant_adapter.save(MemoryEntry(id="a", text="A", embedding=[0.1] * 4))
+        await qdrant_adapter.save(MemoryEntry(id="b", text="B", embedding=[0.1] * 4))
+
+        assert (await qdrant_adapter.get("a")).text == "A"
+        assert (await qdrant_adapter.get("b")).text == "B"

@@ -11,6 +11,7 @@ from axon.core.audit import AuditLogger
 from axon.core.config import MemoryConfig
 from axon.core.memory_system import MemorySystem
 from axon.core.policies import EphemeralPolicy, PersistentPolicy, SessionPolicy
+from axon.errors import ForgetIncompleteError
 from axon.models.audit import EventStatus, OperationType
 from axon.models.entry import MemoryEntry, MemoryMetadata
 from axon.models.filter import Filter
@@ -151,10 +152,12 @@ async def test_forget_failure_in_one_tier_still_clears_others_then_raises(system
 
     session.delete = broken_delete
 
-    with pytest.raises(RuntimeError, match="Forget incomplete") as exc_info:
+    with pytest.raises(ForgetIncompleteError, match="Forget incomplete") as exc_info:
         await system.forget("dup")
 
-    assert "session" in str(exc_info.value)
+    assert exc_info.value.deleted_count == 2
+    assert list(exc_info.value.failures) == ["session"]
+    assert isinstance(exc_info.value.failures["session"], ConnectionError)
     assert await count(system, "ephemeral") == 0
     assert await count(system, "persistent") == 0
     assert await count(system, "session") == 1  # the failed tier is the one left behind

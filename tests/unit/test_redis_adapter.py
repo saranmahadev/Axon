@@ -53,7 +53,7 @@ def sample_entry():
             user_id="user_123",
             session_id="session_456",
             source="app",
-            privacy_level="private",
+            privacy_level="internal",
             tags=["test", "redis", "validation"],
             importance=0.8,
             provenance=[
@@ -297,7 +297,7 @@ class TestRedisQuery:
                 id=f"privacy_{i}",
                 text=f"Privacy test {i}",
                 embedding=[0.1] * 384,
-                metadata=MemoryMetadata(privacy_level="public" if i % 2 == 0 else "private"),
+                metadata=MemoryMetadata(privacy_level="public" if i % 2 == 0 else "internal"),
             )
             for i in range(6)
         ]
@@ -385,9 +385,9 @@ class TestRedisGet:
 
     @pytest.mark.asyncio
     async def test_get_nonexistent_entry(self, redis_adapter):
-        """Test retrieving non-existent entry returns None."""
-        result = await redis_adapter.get("nonexistent_id")
-        assert result is None
+        """Test retrieving non-existent entry raises KeyError (StorageAdapter contract)."""
+        with pytest.raises(KeyError):
+            await redis_adapter.get("nonexistent_id")
 
     @pytest.mark.asyncio
     async def test_get_includes_embedding(self, redis_adapter, sample_entry):
@@ -437,8 +437,8 @@ class TestRedisDelete:
         assert deleted is True
 
         # Verify deletion
-        retrieved = await redis_adapter.get(sample_entry.id)
-        assert retrieved is None
+        with pytest.raises(KeyError):
+            await redis_adapter.get(sample_entry.id)
 
     @pytest.mark.asyncio
     async def test_delete_nonexistent_entry(self, redis_adapter):
@@ -687,8 +687,8 @@ class TestRedisTTL:
         await asyncio.sleep(3)
 
         # Verify it's gone
-        retrieved_after = await redis_adapter.get(entry.id)
-        assert retrieved_after is None
+        with pytest.raises(KeyError):
+            await redis_adapter.get(entry.id)
 
 
 # ============================================================================
@@ -855,7 +855,7 @@ class TestRedisEdgeCases:
                     session_id=f"session_{i % 2}",
                     tags=["test", "combined"],
                     importance=0.5 + (i * 0.04),  # 0.5 to 0.86 (max 0.86 for i=9)
-                    privacy_level="public" if i % 2 == 0 else "private",
+                    privacy_level="public" if i % 2 == 0 else "internal",
                 ),
             )
             for i in range(10)

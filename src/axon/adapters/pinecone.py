@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 from pinecone import Pinecone, ServerlessSpec
 
+from ..errors import AdapterError
 from ..models import Filter, MemoryEntry
 from .base import StorageAdapter
 
@@ -453,7 +454,7 @@ class PineconeAdapter(StorageAdapter):
         ids = [match["id"] for match in results.get("matches", [])]
         if len(ids) >= limit:
             # Callers such as forget(filter=...) need every ID; never return a partial list
-            raise RuntimeError(
+            raise AdapterError(
                 f"Pinecone can list at most {limit} IDs per call and the namespace may hold "
                 "more. Pass explicit entry IDs instead, or raise `limit`."
             )

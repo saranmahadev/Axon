@@ -22,6 +22,7 @@ from abc import ABC, abstractmethod
 
 from openai import AsyncOpenAI
 
+from ..errors import SummarizationError
 from ..models.entry import MemoryEntry
 
 
@@ -276,7 +277,7 @@ class LLMSummarizer(Summarizer):
                     continue
                 else:
                     # Final attempt failed
-                    raise RuntimeError(
+                    raise SummarizationError(
                         f"Failed to summarize entries after {max_retries} attempts: {str(e)}"
                     ) from e
 

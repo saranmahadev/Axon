@@ -75,6 +75,7 @@ markers = [
     "unit: Unit tests",
     "integration: Integration tests",
     "slow: Slow running tests",
+    "contract: Behavior every StorageAdapter must satisfy (run against each backend)",
 ]
 
 [tool.coverage.run]

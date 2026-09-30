@@ -54,10 +54,11 @@ phase's exit criteria are met (Phases 4 and 5 may overlap).
       failure, PII detection (including odd input)
 - [ ] **Concurrency:** Router is single-event-loop only; document it and add a clear guard
       rather than silent corruption
-- [ ] **Adapter contract tests:** one shared suite every adapter must pass; integration
-      tests against real services in Docker
-- [ ] **Error model:** small exception hierarchy (`AxonError`, `AdapterError`, `PolicyError`, ...)
-      with clear messages
+- [x] **Adapter contract tests:** one shared suite (`tests/contract/`, ~190 cases) run against memory,
+      Chroma, Qdrant and Redis (real server); Pinecone runs when `PINECONE_API_KEY` is set.
+      *Follow-up: run Redis/Qdrant as CI service containers (Phase 3).*
+- [x] **Error model:** `axon.errors` hierarchy rooted at `AxonError`; each class also subclasses the
+      builtin it replaces so existing `except` clauses keep working
 - [ ] **Data safety:** add `schema_version` to stored entries and define a migration path
 
 **Exit criteria:** contract suite passes on all adapters, no known data-loss bugs,

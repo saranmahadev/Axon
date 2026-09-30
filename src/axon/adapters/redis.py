@@ -21,6 +21,8 @@ from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 
+from ..errors import EntryNotFoundError
+from ._serialization import extra_metadata_from_json, extra_metadata_to_json
 from .base import StorageAdapter
 
 if TYPE_CHECKING:
@@ -118,6 +120,7 @@ class RedisAdapter(StorageAdapter):
         # Serialize complex fields to JSON
         data = {
             "id": entry.id,
+            "type": entry.type,
             "text": entry.text,
             "embedding": json.dumps(entry.embedding) if entry.embedding else "",
             "created_at": (
@@ -138,6 +141,9 @@ class RedisAdapter(StorageAdapter):
             data["last_accessed_at"] = entry.metadata.last_accessed_at.isoformat()
         if entry.metadata.version:
             data["version"] = entry.metadata.version
+        extra_json = extra_metadata_to_json(entry.metadata)
+        if extra_json:
+            data["extra_metadata"] = extra_json
         if entry.metadata.provenance:
             # Serialize provenance to JSON
             data["provenance"] = json.dumps(
@@ -203,10 +209,12 @@ class RedisAdapter(StorageAdapter):
             importance=float(data["importance"]) if data.get("importance") else 0.5,
             version=data.get("version", ""),
             provenance=provenance,
+            **extra_metadata_from_json(data.get("extra_metadata")),
         )
 
         return MemoryEntry(
             id=data["id"],
+            type=data.get("type", "note"),
             text=data["text"],
             embedding=embedding,
             metadata=metadata,
@@ -225,6 +233,8 @@ class RedisAdapter(StorageAdapter):
         Raises:
             ValueError: If entry is invalid
         """
+        if entry is None:
+            raise ValueError("Entry cannot be None")
         if not entry.id:
             raise ValueError("Entry must have an ID")
 
@@ -265,6 +275,9 @@ class RedisAdapter(StorageAdapter):
         Returns:
             List of matching entries (up to k), sorted by recency
         """
+        if k <= 0:
+            raise ValueError("k must be positive")
+
         entries = []
 
         # Scan for all keys in namespace
@@ -358,7 +371,7 @@ class RedisAdapter(StorageAdapter):
 
         return True
 
-    async def get(self, id: str, refresh_ttl: bool = False) -> MemoryEntry | None:
+    async def get(self, id: str, refresh_ttl: bool = False) -> MemoryEntry:
         """Retrieve a memory entry by ID.
 
         Args:
@@ -366,13 +379,16 @@ class RedisAdapter(StorageAdapter):
             refresh_ttl: If True, reset TTL to default_ttl on access
 
         Returns:
-            The memory entry, or None if not found
+            The memory entry
+
+        Raises:
+            KeyError: If the entry does not exist (or its TTL has expired)
         """
         key = self._get_key(id)
         data = await self.redis.hgetall(key)
 
         if not data:
-            return None
+            raise EntryNotFoundError(id)
 
         # Optionally refresh TTL on access
         if refresh_ttl and self.default_ttl is not None:

@@ -216,7 +216,7 @@ class TestChromaAdapterSave:
                 user_id="user123",
                 session_id="session456",
                 source="app",
-                privacy_level="private",
+                privacy_level="internal",
                 tags=["tag1", "tag2", "tag3"],
                 importance=0.95,
                 version="v1.0",
@@ -237,7 +237,7 @@ class TestChromaAdapterSave:
         assert retrieved.metadata.user_id == "user123"
         assert retrieved.metadata.session_id == "session456"
         assert retrieved.metadata.source == "app"
-        assert retrieved.metadata.privacy_level == "private"
+        assert retrieved.metadata.privacy_level == "internal"
         assert retrieved.metadata.tags == ["tag1", "tag2", "tag3"]
         assert retrieved.metadata.importance == 0.95
         assert retrieved.metadata.version == "v1.0"

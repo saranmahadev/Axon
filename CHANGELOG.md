@@ -5,6 +5,47 @@ All notable changes to Axon will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Breaking changes (pre-1.0)
+
+- **`QdrantAdapter` now implements the `StorageAdapter` interface.** It previously did not, so a
+  Qdrant tier could not be used through `MemorySystem`.
+  - `query(embedding, filter, limit)` is now `query(vector, k=5, filter=None)` (also `query_sync`)
+  - `save()` / `bulk_save()` return the entry id(s) instead of `None`; `bulk_save([])` raises `ValueError`
+  - `get()` raises `EntryNotFoundError` (a `KeyError`) instead of returning `None`
+  - `delete()` and `get()` no longer swallow backend errors (an outage used to look like "not found")
+- **`RedisAdapter.get()` raises `EntryNotFoundError` (a `KeyError`) instead of returning `None`**,
+  as the `StorageAdapter` contract specifies. `query()` now rejects `k <= 0`.
+- `PolicyEngine.check_overflow()` / `should_compact()` require an explicit `current_count` when the
+  tier has a limit (they used to assume 0). Use the new `check_overflow_async()` /
+  `should_compact_async()` to look the count up from the registry.
+
+### Added
+
+- **Exception hierarchy** (`axon.errors`, also exported from `axon`): `AxonError` and
+  `ConfigurationError`, `TierNotFoundError`, `EntryNotFoundError`, `AdapterError`,
+  `ForgetIncompleteError`, `EmbeddingError`, `SummarizationError`, `TransactionError`,
+  `AuditError`. Each also subclasses the builtin it replaces (`KeyError`/`ValueError`/`RuntimeError`),
+  so existing `except` clauses keep working.
+- `MemorySystem.forget()` (documented but previously missing), audit-logged.
+- `StorageAdapter.count_async()` and `list_ids_async()`; `AdapterRegistry.get_statistics()`.
+- **Adapter contract test suite** (`tests/contract/`) run against every adapter. Redis and Qdrant use a
+  live server via `AXON_TEST_REDIS_URL` / `AXON_TEST_QDRANT_URL` (Qdrant defaults to in-process).
+- Qdrant accepts arbitrary string entry ids (mapped deterministically to UUIDs).
+
+### Fixed
+
+- `forget()` deleted nothing and reported success (router called `adapter.delete()` with the wrong
+  arguments). Failures in any tier now raise `ForgetIncompleteError` after all tiers are attempted.
+- **Chroma, Qdrant and Redis silently dropped custom/extra metadata** (`pii_detection`,
+  `access_count`, user metadata); Qdrant and Redis also dropped `type`, and Qdrant dropped `version`.
+- Tier capacity was never enforced (entry count was hard-coded to 0).
+- Audit log rotation with `auto_export_path` deadlocked and overwrote earlier exports.
+- `store()` crashed after writing when audit logging was on and `privacy_level` was a plain string.
+- `export()` could return a silently incomplete export; `sync()` swallowed per-entry errors.
+- Qdrant `list_ids` was capped at 10,000 ids; Pinecone `list_ids_async` now raises instead of truncating.
+
 ## [1.0.0-beta] - 2025-11-09
 
 ### Added

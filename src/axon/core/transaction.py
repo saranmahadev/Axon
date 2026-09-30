@@ -28,6 +28,7 @@ from enum import Enum
 from typing import Any
 
 from ..adapters.base import StorageAdapter
+from ..errors import TierNotFoundError, TransactionError
 from ..models.entry import MemoryEntry
 
 logger = logging.getLogger(__name__)
@@ -208,7 +209,9 @@ class TransactionCoordinator:
                 )
 
             if tier not in self.adapters:
-                raise KeyError(f"No adapter registered for tier '{tier}'")
+                raise TierNotFoundError(
+                    tier, list(self.adapters), f"No adapter registered for tier '{tier}'"
+                )
 
             # Get or create participant state
             if tier not in txn["participants"]:
@@ -549,12 +552,12 @@ class TransactionCoordinator:
             prepared = await self.prepare(txn_id)
             if not prepared:
                 await self.abort(txn_id)
-                raise RuntimeError(f"Transaction {txn_id} failed to prepare")
+                raise TransactionError(f"Transaction {txn_id} failed to prepare")
 
             # Commit phase
             committed = await self.commit(txn_id)
             if not committed:
-                raise RuntimeError(f"Transaction {txn_id} failed to commit")
+                raise TransactionError(f"Transaction {txn_id} failed to commit")
 
         except Exception as e:
             logger.error(f"Transaction {txn_id} error: {e}")

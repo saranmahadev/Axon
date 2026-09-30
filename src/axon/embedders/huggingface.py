@@ -9,6 +9,7 @@ from __future__ import annotations
 import torch
 from transformers import AutoModel, AutoTokenizer
 
+from ..errors import EmbeddingError
 from .base import Embedder
 from .cache import get_global_cache
 
@@ -150,7 +151,7 @@ class HuggingFaceEmbedder(Embedder):
             return embedding_list
 
         except Exception as e:
-            raise RuntimeError(f"HuggingFace embedding failed: {str(e)}") from e
+            raise EmbeddingError(f"HuggingFace embedding failed: {str(e)}") from e
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts efficiently.
@@ -223,7 +224,7 @@ class HuggingFaceEmbedder(Embedder):
                         self._cache.put(text, self._model_name, embedding_list)
 
             except Exception as e:
-                raise RuntimeError(f"HuggingFace batch embedding failed: {str(e)}") from e
+                raise EmbeddingError(f"HuggingFace batch embedding failed: {str(e)}") from e
 
         # Type assertion (all should be filled now)
         return [e for e in embeddings if e is not None]

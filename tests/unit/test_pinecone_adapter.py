@@ -80,7 +80,7 @@ def sample_entries():
             embedding=[float(i + 1) * 0.1] * 384,  # Start from 1 to avoid all zeros
             metadata=MemoryMetadata(
                 source="app",
-                privacy_level="public" if i % 2 == 0 else "private",
+                privacy_level="public" if i % 2 == 0 else "internal",
                 importance=0.5 + (i * 0.1),
                 tags=[f"tag{i}"],
                 provenance=[ProvenanceEvent(action="store", by="test_suite")],
@@ -673,7 +673,7 @@ class TestPineconeEdgeCases:
         sample_entries[0].metadata.tags = ["important"]
 
         sample_entries[1].metadata.user_id = "user_1"
-        sample_entries[1].metadata.privacy_level = "private"
+        sample_entries[1].metadata.privacy_level = "internal"
         sample_entries[1].metadata.tags = ["other"]
 
         await pinecone_adapter.bulk_save(sample_entries)

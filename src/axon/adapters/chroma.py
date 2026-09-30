@@ -17,7 +17,9 @@ from typing import TYPE_CHECKING
 import chromadb
 from chromadb.config import Settings
 
+from ..errors import AdapterError, EntryNotFoundError
 from ..models import Filter, MemoryEntry
+from ._serialization import extra_metadata_from_json, extra_metadata_to_json
 from .base import StorageAdapter
 
 if TYPE_CHECKING:
@@ -83,7 +85,7 @@ class ChromaAdapter(StorageAdapter):
             )
 
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize ChromaDB: {str(e)}") from e
+            raise AdapterError(f"Failed to initialize ChromaDB: {str(e)}") from e
 
     def _entry_to_chroma_format(self, entry: MemoryEntry) -> tuple[str, list[float], dict, str]:
         """Convert MemoryEntry to ChromaDB format.
@@ -120,6 +122,11 @@ class ChromaAdapter(StorageAdapter):
         # Serialize tags as JSON string (ChromaDB doesn't support list filtering well)
         if entry.metadata.tags:
             metadata["tags"] = json.dumps(entry.metadata.tags)
+
+        # Persist non-core metadata (pii_detection, access_count, custom fields, ...)
+        extra_json = extra_metadata_to_json(entry.metadata)
+        if extra_json:
+            metadata["extra_metadata"] = extra_json
 
         # Serialize provenance as JSON string (use mode='json' to serialize datetimes)
         if entry.metadata.provenance:
@@ -182,6 +189,7 @@ class ChromaAdapter(StorageAdapter):
             importance=metadata.get("importance", 0.5),
             version=metadata.get("version", ""),
             provenance=provenance,
+            **extra_metadata_from_json(metadata.get("extra_metadata")),
         )
 
         # Build MemoryEntry
@@ -277,7 +285,7 @@ class ChromaAdapter(StorageAdapter):
             # Re-raise ValueErrors (like missing embedding) directly
             raise
         except Exception as e:
-            raise RuntimeError(f"ChromaDB save failed: {str(e)}") from e
+            raise AdapterError(f"ChromaDB save failed: {str(e)}") from e
 
     async def query(
         self,
@@ -337,7 +345,7 @@ class ChromaAdapter(StorageAdapter):
             return entries
 
         except Exception as e:
-            raise RuntimeError(f"ChromaDB query failed: {str(e)}") from e
+            raise AdapterError(f"ChromaDB query failed: {str(e)}") from e
 
     async def get(self, id: str) -> MemoryEntry:
         """Retrieve a memory entry by ID.
@@ -358,7 +366,7 @@ class ChromaAdapter(StorageAdapter):
             )
 
             if not results or not results["ids"]:
-                raise KeyError(f"Entry {id} not found")
+                raise EntryNotFoundError(id)
 
             return self._chroma_to_entry(
                 id=results["ids"][0],
@@ -370,7 +378,7 @@ class ChromaAdapter(StorageAdapter):
         except KeyError:
             raise
         except Exception as e:
-            raise RuntimeError(f"ChromaDB get failed: {str(e)}") from e
+            raise AdapterError(f"ChromaDB get failed: {str(e)}") from e
 
     async def delete(self, id: str) -> bool:
         """Delete a memory entry by ID.
@@ -396,7 +404,7 @@ class ChromaAdapter(StorageAdapter):
             return True
 
         except Exception as e:
-            raise RuntimeError(f"ChromaDB delete failed: {str(e)}") from e
+            raise AdapterError(f"ChromaDB delete failed: {str(e)}") from e
 
     async def bulk_save(self, entries: list[MemoryEntry]) -> list[str]:
         """Save multiple memory entries efficiently.
@@ -435,7 +443,7 @@ class ChromaAdapter(StorageAdapter):
             return ids
 
         except Exception as e:
-            raise RuntimeError(f"ChromaDB bulk_save failed: {str(e)}") from e
+            raise AdapterError(f"ChromaDB bulk_save failed: {str(e)}") from e
 
     async def reindex(self) -> None:
         """Rebuild indices (no-op for ChromaDB as it auto-indexes).

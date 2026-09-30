@@ -9,6 +9,7 @@ import asyncio
 from typing import Any
 
 from axon.adapters.base import StorageAdapter
+from axon.errors import AdapterError, ConfigurationError, TierNotFoundError
 
 
 class AdapterRegistry:
@@ -64,14 +65,14 @@ class AdapterRegistry:
             If tier already registered, this will override the previous registration.
         """
         if adapter_instance is None and adapter_config is None:
-            raise ValueError(
+            raise ConfigurationError(
                 f"Must provide either adapter_instance or adapter_config for tier '{tier}'"
             )
 
         # Validate adapter_type
         valid_types = {"memory", "redis", "chroma", "qdrant", "pinecone"}
         if adapter_type not in valid_types:
-            raise ValueError(
+            raise ConfigurationError(
                 f"Invalid adapter_type '{adapter_type}'. "
                 f"Must be one of: {', '.join(sorted(valid_types))}"
             )
@@ -115,9 +116,11 @@ class AdapterRegistry:
             for same tier will initialize only once.
         """
         if tier not in self._adapter_types:
-            raise KeyError(
+            raise TierNotFoundError(
+                tier,
+                self.get_all_tiers(),
                 f"Tier '{tier}' not registered. "
-                f"Registered tiers: {', '.join(self.get_all_tiers())}"
+                f"Registered tiers: {', '.join(self.get_all_tiers())}",
             )
 
         # Fast path: already initialized
@@ -155,8 +158,9 @@ class AdapterRegistry:
                 adapter = self._create_adapter(adapter_type, config)
                 self._adapters[tier] = adapter
             except Exception as e:
-                raise RuntimeError(
-                    f"Failed to create adapter for tier '{tier}' " f"(type: {adapter_type}): {e}"
+                raise AdapterError(
+                    f"Failed to create adapter for tier '{tier}' " f"(type: {adapter_type}): {e}",
+                    tier=tier,
                 ) from e
 
         # Initialize the adapter if it has an initialize method
@@ -165,7 +169,9 @@ class AdapterRegistry:
                 await adapter.initialize()
                 self._initialized[tier] = True
             except Exception as e:
-                raise RuntimeError(f"Failed to initialize adapter for tier '{tier}': {e}") from e
+                raise AdapterError(
+                    f"Failed to initialize adapter for tier '{tier}': {e}", tier=tier
+                ) from e
         else:
             # No initialize method, mark as initialized
             self._initialized[tier] = True
@@ -224,7 +230,7 @@ class AdapterRegistry:
 
             return PineconeAdapter(**config)
         else:
-            raise ValueError(f"Unsupported adapter type: {adapter_type}")
+            raise ConfigurationError(f"Unsupported adapter type: {adapter_type}")
 
     async def get_statistics(self, tier: str) -> dict[str, Any]:
         """

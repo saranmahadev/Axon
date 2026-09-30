@@ -11,6 +11,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from ..errors import AuditError
 from ..models.audit import AuditEvent, EventStatus, OperationType
 
 
@@ -114,9 +115,7 @@ class AuditLogger:
             # Called with self._lock held, so pass a snapshot explicitly: exporting with
             # events=None would try to re-acquire the (non-reentrant) lock and deadlock.
             # Append to earlier rotations so a later rotation never overwrites them.
-            await self._export_to_file(
-                self._auto_export_path, list(self._events), append=True
-            )
+            await self._export_to_file(self._auto_export_path, list(self._events), append=True)
             self._events.clear()
         else:
             # Keep newest half
@@ -229,11 +228,11 @@ class AuditLogger:
                     existing = json.load(f)
             except (OSError, json.JSONDecodeError) as e:
                 # Never silently discard audit data; fail loudly instead.
-                raise RuntimeError(
+                raise AuditError(
                     f"Cannot append to existing audit export '{file_path}': {e}"
                 ) from e
             if not isinstance(existing, list):
-                raise RuntimeError(f"Existing audit export '{file_path}' is not a JSON list")
+                raise AuditError(f"Existing audit export '{file_path}' is not a JSON list")
             events_dict = existing + events_dict
 
         # Write to file

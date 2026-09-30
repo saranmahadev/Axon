@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import voyageai
 
+from ..errors import EmbeddingError
 from .base import Embedder
 from .cache import get_global_cache
 
@@ -119,7 +120,7 @@ class VoyageAIEmbedder(Embedder):
             return embedding
 
         except Exception as e:
-            raise RuntimeError(f"Voyage AI embedding failed: {str(e)}") from e
+            raise EmbeddingError(f"Voyage AI embedding failed: {str(e)}") from e
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts efficiently.
@@ -179,7 +180,7 @@ class VoyageAIEmbedder(Embedder):
                         self._cache.put(text, self._model, embedding)
 
             except Exception as e:
-                raise RuntimeError(f"Voyage AI batch embedding failed: {str(e)}") from e
+                raise EmbeddingError(f"Voyage AI batch embedding failed: {str(e)}") from e
 
         # Type assertion (all should be filled now)
         return [e for e in embeddings if e is not None]

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from openai import AsyncOpenAI, OpenAI
 
+from ..errors import EmbeddingError
 from .base import Embedder
 from .cache import get_global_cache
 
@@ -134,7 +135,7 @@ class OpenAIEmbedder(Embedder):
             return embedding
 
         except Exception as e:
-            raise RuntimeError(f"OpenAI embedding failed: {str(e)}") from e
+            raise EmbeddingError(f"OpenAI embedding failed: {str(e)}") from e
 
     async def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for multiple texts efficiently.
@@ -195,7 +196,7 @@ class OpenAIEmbedder(Embedder):
                         self._cache.put(text, self._model, embedding)
 
             except Exception as e:
-                raise RuntimeError(f"OpenAI batch embedding failed: {str(e)}") from e
+                raise EmbeddingError(f"OpenAI batch embedding failed: {str(e)}") from e
 
         # Type assertion (all should be filled now)
         return [e for e in embeddings if e is not None]

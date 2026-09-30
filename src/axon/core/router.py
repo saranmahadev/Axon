@@ -13,6 +13,7 @@ from typing import Any
 from axon.core.adapter_registry import AdapterRegistry
 from axon.core.config import MemoryConfig
 from axon.core.policy_engine import PolicyEngine
+from axon.errors import ForgetIncompleteError, TierNotFoundError
 from axon.models.entry import MemoryEntry
 from axon.models.filter import Filter
 
@@ -168,7 +169,9 @@ class Router:
 
         # Validate tier exists
         if tier not in self.config.tiers:
-            raise KeyError(f"Tier '{tier}' not found in configuration")
+            raise TierNotFoundError(
+                tier, list(self.config.tiers), f"Tier '{tier}' not found in configuration"
+            )
 
         # Check for overflow and handle if policy engine available
         if self.policy_engine:
@@ -349,7 +352,9 @@ class Router:
         # Determine which tiers to search
         if tier is not None:
             if tier not in self.config.tiers:
-                raise KeyError(f"Tier '{tier}' not found in configuration")
+                raise TierNotFoundError(
+                    tier, list(self.config.tiers), f"Tier '{tier}' not found in configuration"
+                )
             tiers = [tier]
         else:
             tiers = list(self.config.tiers.keys())
@@ -378,11 +383,7 @@ class Router:
         )
 
         if failures:
-            details = "; ".join(f"{t}: {e}" for t, e in failures.items())
-            raise RuntimeError(
-                f"Forget incomplete: {total_deleted} entries deleted, but {len(failures)} "
-                f"tier(s) failed ({details})"
-            )
+            raise ForgetIncompleteError(total_deleted, failures)
 
         return total_deleted
 

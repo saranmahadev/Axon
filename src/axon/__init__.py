@@ -30,6 +30,18 @@ from .embedders import (
     clear_global_cache,
     get_global_cache,
 )
+from .errors import (
+    AdapterError,
+    AuditError,
+    AxonError,
+    ConfigurationError,
+    EmbeddingError,
+    EntryNotFoundError,
+    ForgetIncompleteError,
+    SummarizationError,
+    TierNotFoundError,
+    TransactionError,
+)
 
 # Lazy imports for heavy dependencies
 if TYPE_CHECKING:
@@ -100,6 +112,17 @@ __all__ = [
     "__version__",
     # Core
     "MemorySystem",
+    # Errors
+    "AxonError",
+    "AdapterError",
+    "AuditError",
+    "ConfigurationError",
+    "EmbeddingError",
+    "EntryNotFoundError",
+    "ForgetIncompleteError",
+    "SummarizationError",
+    "TierNotFoundError",
+    "TransactionError",
     # Models
     "MemoryEntry",
     "MemoryMetadata",
